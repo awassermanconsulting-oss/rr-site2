@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/check-crossings",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 21 * * *"
     }
   ]
 }
