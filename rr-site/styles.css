@@ -23,3 +23,15 @@ td,th{border-bottom:1px solid #203157;padding:8px;text-align:left}
 .badge-yellow { border-color:#8d6b2b; color:#ffe8a3; }
 .badge-orange { border-color:#8a4730; color:#ffc7a6; }
 .badge-red { border-color:#7d2d2d; color:#ffb3b3; }
+.thumb{
+  display:block;
+  width:180px;           /* thumbnail size */
+  height:100px;
+  object-fit:cover;
+  border-radius:8px;
+  border:1px solid #203157;
+}
+@media (max-width: 720px){
+  .thumb{ width:140px; height:78px; }
+}
+
