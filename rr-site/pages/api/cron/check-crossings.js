@@ -23,7 +23,7 @@ function zoneName(idx) {
 // ---- config ----
 const ALPHA = process.env.ALPHA_VANTAGE_KEY;
 const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const PER_RUN = 4; // process a few tickers per run to respect Alpha free limits
+const PER_RUN = 100; // process a few tickers per run to respect Alpha free limits
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function getDailyClose(symbol) {
