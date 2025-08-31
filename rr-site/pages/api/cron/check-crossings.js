@@ -4,20 +4,14 @@
 import { kv } from "@vercel/kv";
 import { Resend } from "resend";
 
-// (optional) score thresholds that define the zone edges
-const BOUNDARIES = [7, 5, 2]; // (between 10–7, 7–5, 5–2, 2–0)
-
 // Given low/high and a score S in [0..10], return the price at that score line.
-// s = 10 * log(high/p) / log(high/low)  =>  p = high / (high/low)^(s/10)
 function priceAtScore(low, high, s) {
   const ratio = high / low;
   const p = high / Math.pow(ratio, s / 10);
   return p;
 }
 
-// PRICE direction (not zone-index direction!)
-// Lower zone index => score went down => price went UP toward the top (0).
-// Higher zone index => score went up => price went DOWN toward the bottom (10).
+// PRICE direction (not zone-index direction)
 function priceDirection(fromZone, toZone) {
   if (toZone < fromZone) return "UP";
   if (toZone > fromZone) return "DOWN";
@@ -44,10 +38,10 @@ function scoreLog(price, low, high) {
   return Math.max(0, Math.min(10, s));
 }
 function zoneIndex(s) {
-  if (s >= 7) return 3;      // 10–7  (Buy Zone)
-  if (s >= 5) return 2;      // 7–5   (Above Halfway Point)
-  if (s >= 2) return 1;      // 5–2   (Below Halfway Point)
-  return 0;                  // 2–0   (Sell Zone)
+  if (s >= 7) return 3;      // 10–7
+  if (s >= 5) return 2;      // 7–5
+  if (s >= 2) return 1;      // 5–2
+  return 0;                  // 2–0
 }
 
 // ---- config ----
@@ -78,7 +72,7 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
   let sent = false;
 
   if (!onCooldown && process.env.RESEND_API_KEY && process.env.ALERT_FROM && process.env.ALERT_TO) {
-    const direction = priceDirection(fromZone, toZone); // "UP" | "DOWN" | "FLAT" (shouldn't be FLAT if we got here)
+    const direction = priceDirection(fromZone, toZone); // "UP" | "DOWN"
     const boundary = crossedBoundary(fromZone, toZone); // 7 | 5 | 2 | null
     const boundaryPrice = boundary ? priceAtScore(low, high, boundary) : null;
 
@@ -103,6 +97,7 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
       </div>`;
 
     try {
+      console.log(`[email] ${ticker}: sending "${subject}"`);
       await resend.emails.send({
         from: process.env.ALERT_FROM,
         to: process.env.ALERT_TO, // later: subscriber emails
@@ -111,9 +106,13 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
       });
       newState.lastEmailAt = now;
       sent = true;
-    } catch (_) {
-      // if email fails, keep lastEmailAt unchanged so we can retry on next run
+      console.log(`[email] ${ticker}: sent`);
+    } catch (e) {
+      console.log(`[email] ${ticker}: FAILED -> ${e?.message || e}`);
+      // keep lastEmailAt unchanged so we can retry later
     }
+  } else {
+    if (onCooldown) console.log(`[cooldown] ${ticker}: within 7 days, no email`);
   }
 
   await kv.set(stateKey, newState);
@@ -126,31 +125,37 @@ export default async function handler(req, res) {
     if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN)
       return res.status(500).json({ error: "Vercel KV env vars missing" });
 
-    // get sheet data
     const origin = `${req.headers["x-forwarded-proto"] || "https"}://${req.headers.host}`;
     const listResp = await fetch(`${origin}/api/tickers`, { cache: "no-store" });
     const { items = [] } = await listResp.json();
     if (!items.length) return res.status(200).json({ processed: 0, sent: 0 });
 
-    // one pass over all (PER_RUN is large)
     const total = items.length;
     const start = (await kv.get("alert:cursor")) || 0;
     const slice = items.slice(start, Math.min(start + PER_RUN, total));
     const nextCursor = (start + PER_RUN) % total;
 
+    console.log(`[cron] processing ${slice.length}/${total} (cursor ${start} → ${nextCursor})`);
+
     let sent = 0;
     for (const it of slice) {
       const { ticker, low, high } = it;
+      console.log(`[check] ${ticker}: low=${low}, high=${high}`);
       const latest = await getDailyClose(ticker);
-      if (!latest || !Number.isFinite(latest.close)) continue;
+      if (!latest || !Number.isFinite(latest.close)) {
+        console.log(`[check] ${ticker}: no daily close available`);
+        continue;
+      }
 
       const s = scoreLog(latest.close, low, high);
       const z = zoneIndex(s);
+      console.log(`[score] ${ticker}: close=$${latest.close.toFixed(2)} score=${s.toFixed(2)} zone=${zoneName(z)}`);
 
       const stateKey = `alert:${ticker}`;
       const prev = (await kv.get(stateKey)) || { lastZone: z, lastEmailAt: 0 };
 
       if (prev.lastZone !== z) {
+        console.log(`[cross] ${ticker}: ${zoneName(prev.lastZone)} → ${zoneName(z)}`);
         const didSend = await maybeEmail({
           ticker,
           fromZone: prev.lastZone,
@@ -162,14 +167,16 @@ export default async function handler(req, res) {
         });
         sent += didSend ? 1 : 0;
       } else {
-        // ensure state exists for first-time tickers
         await kv.set(stateKey, prev);
+        console.log(`[steady] ${ticker}: still ${zoneName(z)}`);
       }
     }
 
     await kv.set("alert:cursor", nextCursor);
+    console.log(`[cron] done: emails sent=${sent}`);
     return res.status(200).json({ processed: slice.length, total, sent, nextCursor });
   } catch (e) {
+    console.log(`[error] ${e?.message || e}`);
     return res.status(500).json({ error: String(e?.message || e) });
   }
 }
