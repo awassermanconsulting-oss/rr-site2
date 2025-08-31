@@ -1,64 +1,130 @@
+import { useEffect, useMemo, useState } from "react";
 
-import { useState } from 'react'
+const badgeFor = (score) => {
+  if (score >= 7) return { label: "Green", className: "badge badge-green" };
+  if (score >= 5) return { label: "Yellow", className: "badge badge-yellow" };
+  if (score >= 2) return { label: "Orange", className: "badge badge-orange" };
+  return { label: "Red", className: "badge badge-red" };
+};
+
+// Low = 10, High = 0 (log scale)
+function scoreLog10(price, low, high) {
+  // keep in bounds
+  const p = Math.max(Math.min(price, high), low);
+  const s = 10 * (Math.log(high / p) / Math.log(high / low));
+  return Math.max(0, Math.min(10, s));
+}
 
 export default function Home() {
-  const [symbol, setSymbol] = useState('AAPL')
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState(null)
-  const stripeLink = process.env.NEXT_PUBLIC_STRIPE_LINK || '#'
+  const [rows, setRows] = useState([]); // {ticker, low, high, pickType, price, score}
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  async function check() {
-    setLoading(true)
-    try {
-      const [p, rr] = await Promise.all([
-        fetch('/api/price?symbol=' + encodeURIComponent(symbol)).then(r=>r.json()),
-        fetch('/api/rr?symbol=' + encodeURIComponent(symbol)).then(r=>r.json())
-      ])
-      setResult({ price: p.price, rr })
-    } catch (e) {
-      alert('Error: ' + e.message)
-    } finally {
-      setLoading(false)
-    }
-  }
+  // fetch sheet tickers
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/tickers");
+        const { items, error } = await r.json();
+        if (error) throw new Error(error);
+        setRows(items.map((x) => ({ ...x, price: null, score: null })));
+      } catch (e) {
+        setError(String(e.message || e));
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  // fetch prices with pacing to respect Alpha Vantage free limits (~5/min)
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      for (let i = 0; i < rows.length; i++) {
+        if (cancel) break;
+        const t = rows[i].ticker.replace(".TO", ".TRT"); // example mapping if needed
+        try {
+          const r = await fetch(`/api/price?symbol=${encodeURIComponent(t)}`);
+          const { price } = await r.json();
+          if (price) {
+            setRows((prev) =>
+              prev.map((row, idx) =>
+                idx === i
+                  ? { ...row, price, score: scoreLog10(price, row.low, row.high) }
+                  : row
+              )
+            );
+          }
+        } catch (e) {}
+        // wait ~15s between calls to be gentle on free API
+        await new Promise((res) => setTimeout(res, 1500));
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [rows.length]);
+
+  const hasPrices = useMemo(() => rows.some((r) => r.price != null), [rows]);
 
   return (
     <div className="container grid">
       <header className="grid">
         <h1>Risk/Reward Tracker</h1>
-        <p className="small">Paste a ticker, get today’s price and see it vs. your fixed high/low lines.</p>
-        <div><a className="badge" href={stripeLink} target="_blank" rel="noreferrer">Subscribe – $1/month</a></div>
+        <p className="small">Auto-pulls Mark’s tickers from the shared sheet. Colors reflect 10→0 log score.</p>
+        <div>
+          <a
+            className="badge"
+            href={process.env.NEXT_PUBLIC_STRIPE_LINK || "#"}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Subscribe – $1/month
+          </a>
+        </div>
       </header>
 
-      <section className="card grid">
-        <div style={{display:'flex', gap:8, alignItems:'center'}}>
-          <input value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} placeholder="Ticker e.g. AAPL" />
-          <button onClick={check} disabled={loading}>{loading? 'Checking…' : 'Check'}</button>
-        </div>
-        <div className="small">Quick picks: 
-          {['AAPL','MSFT','NVDA','AMZN'].map(t=> (
-            <button key={t} onClick={()=>setSymbol(t)} style={{marginLeft:8}} className="badge">{t}</button>
-          ))}
-        </div>
+      {error && <div className="card" style={{ borderColor: "#a13232" }}>Error: {error}</div>}
+      {loading && !rows.length && <div className="card">Loading tickers…</div>}
 
-        {result && (
-          <div className="grid">
-            <table>
-              <tbody>
-                <tr><th>Ticker</th><td>{symbol}</td></tr>
-                <tr><th>Current Price</th><td>${Number(result.price).toFixed(2)}</td></tr>
-                <tr><th>High Line</th><td>${Number(result.rr.hi).toFixed(2)}</td></tr>
-                <tr><th>Low Line</th><td>${Number(result.rr.lo).toFixed(2)}</td></tr>
-                <tr><th>As Of</th><td>{result.rr.asOf}</td></tr>
-                <tr><th>Status</th>
-                  <td>{Number(result.price)>Number(result.rr.hi) ? 'Above high' : Number(result.price)<Number(result.rr.lo) ? 'Below low' : 'Inside band'}</td>
-                </tr>
-              </tbody>
-            </table>
-            <div className="small">Risk/Reward lines are static from your data source; we’ll automate updates later.</div>
-          </div>
-        )}
-      </section>
+      {!!rows.length && (
+        <section className="card">
+          <table>
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Pick</th>
+                <th>Low</th>
+                <th>High</th>
+                <th>Price</th>
+                <th>Score</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const badge = r.score != null ? badgeFor(r.score) : null;
+                return (
+                  <tr key={r.ticker}>
+                    <td>{r.ticker}</td>
+                    <td className="small">{r.pickType}</td>
+                    <td>${r.low.toFixed(2)}</td>
+                    <td>${r.high.toFixed(2)}</td>
+                    <td>{r.price != null ? `$${Number(r.price).toFixed(2)}` : <span className="small">loading…</span>}</td>
+                    <td>{r.score != null ? r.score.toFixed(2) : "-"}</td>
+                    <td>{badge ? <span className={badge.className}>{badge.label}</span> : "-"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!hasPrices && (
+            <div className="small" style={{ marginTop: 8 }}>
+              Prices load gradually to respect free data limits.
+            </div>
+          )}
+        </section>
+      )}
     </div>
-  )
+  );
 }
