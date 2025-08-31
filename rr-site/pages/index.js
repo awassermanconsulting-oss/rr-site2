@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
+// Label zones
 const ZONE_LABEL = (score) => {
-  // 10–7 = Green (Buy Zone)
-  // 7–5 = Yellow (Below Halfway Point)
-  // 5–2 = Orange (Above Halfway Point)
-  // 2–0 = Red (Sell Zone)
   if (score >= 7) return { name: "Buy Zone", className: "badge badge-green" };
   if (score >= 5) return { name: "Below Halfway Point", className: "badge badge-yellow" };
   if (score >= 2) return { name: "Above Halfway Point", className: "badge badge-orange" };
@@ -19,12 +16,11 @@ function scoreLog10(price, low, high) {
 }
 
 export default function Home() {
-  const [rows, setRows] = useState([]); // {ticker, low, high, pickType, chartUrl?, price, score}
+  const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [priceLoading, setPriceLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // fetch sheet tickers
   async function loadTickers() {
     setLoading(true);
     setError("");
@@ -47,7 +43,6 @@ export default function Home() {
   async function loadPrices() {
     if (!rows.length) return;
     setPriceLoading(true);
-    // Alpha Vantage has tight free limits — pace requests.
     for (let i = 0; i < rows.length; i++) {
       const t = rows[i].ticker;
       try {
@@ -56,7 +51,9 @@ export default function Home() {
         if (j && typeof j.price === "number") {
           setRows((prev) =>
             prev.map((row, idx) =>
-              idx === i ? { ...row, price: j.price, score: scoreLog10(j.price, row.low, row.high) } : row
+              idx === i
+                ? { ...row, price: j.price, score: scoreLog10(j.price, row.low, row.high) }
+                : row
             )
           );
         }
@@ -77,7 +74,9 @@ export default function Home() {
     <div className="container grid">
       <header className="grid">
         <h1>Risk/Reward Tracker</h1>
-        <p className="small">Auto-pulls Mark’s tickers from the shared sheet. Log score 10→0 with color zones.</p>
+        <p className="small">
+          Auto-pulls Mark’s tickers from the shared sheet. Log score 10→0 with color zones.
+        </p>
         <div className="flex-row">
           <a
             className="badge"
@@ -120,12 +119,27 @@ export default function Home() {
                     <td className="small">{r.pickType}</td>
                     <td>${r.low.toFixed(2)}</td>
                     <td>${r.high.toFixed(2)}</td>
-                    <td>{r.price != null ? `$${Number(r.price).toFixed(2)}` : <span className="small">loading…</span>}</td>
+                    <td>
+                      {r.price != null ? `$${Number(r.price).toFixed(2)}` : (
+                        <span className="small">loading…</span>
+                      )}
+                    </td>
                     <td>{r.score != null ? r.score.toFixed(2) : "-"}</td>
-                    <td>{zone ? <span className={zone.className}>{zone.name}</span> : "-"}</td>
+                    <td>
+                      {zone ? <span className={zone.className}>{zone.name}</span> : "-"}
+                    </td>
                     <td>
                       {r.chartUrl ? (
-                        <a href={r.chartUrl} target="_blank" rel="noreferrer">View</a>
+                        <a href={r.chartUrl} target="_blank" rel="noreferrer">
+                          <img
+                            src={`https://image.thum.io/get/width/360/crop/800/${encodeURIComponent(
+                              r.chartUrl
+                            )}`}
+                            alt={`${r.ticker} chart`}
+                            className="thumb"
+                            loading="lazy"
+                          />
+                        </a>
                       ) : (
                         <span className="small">—</span>
                       )}
