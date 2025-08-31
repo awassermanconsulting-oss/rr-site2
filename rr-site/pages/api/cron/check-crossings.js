@@ -3,8 +3,10 @@
 
 import { kv } from "@vercel/kv";
 import { Resend } from "resend";
+import { listSubscribers } from "../../../lib/subscribers";
 
 // Given low/high and a score S in [0..10], return the price at that score line.
+// s = 10 * log(high/p) / log(high/low)  =>  p = high / (high/low)^(s/10)
 function priceAtScore(low, high, s) {
   const ratio = high / low;
   const p = high / Math.pow(ratio, s / 10);
@@ -71,45 +73,49 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
   let newState = { lastZone: toZone, lastEmailAt: last.lastEmailAt };
   let sent = false;
 
-  if (!onCooldown && process.env.RESEND_API_KEY && process.env.ALERT_FROM && process.env.ALERT_TO) {
-    const direction = priceDirection(fromZone, toZone); // "UP" | "DOWN"
-    const boundary = crossedBoundary(fromZone, toZone); // 7 | 5 | 2 | null
-    const boundaryPrice = boundary ? priceAtScore(low, high, boundary) : null;
+  if (!onCooldown && process.env.RESEND_API_KEY && process.env.ALERT_FROM) {
+    const recipients = await listSubscribers();
+    if (!recipients.length) {
+      console.log("[email] no active subscribers; skipping send");
+    } else {
+      const direction = priceDirection(fromZone, toZone); // "UP" | "DOWN"
+      const boundary = crossedBoundary(fromZone, toZone); // 7 | 5 | 2 | null
+      const boundaryPrice = boundary ? priceAtScore(low, high, boundary) : null;
 
-    const fromLabel = zoneName(fromZone);
-    const toLabel   = zoneName(toZone);
+      const fromLabel = zoneName(fromZone);
+      const toLabel   = zoneName(toZone);
 
-    const subject = `R/R alert: ${ticker} moved ${direction} in price into ${toLabel}`;
+      const subject = `R/R alert: ${ticker} moved ${direction} in price into ${toLabel}`;
+      const html = `
+        <div style="font-family:system-ui,Segoe UI,Arial,sans-serif">
+          <h2 style="margin:0 0 8px 0">${ticker} moved ${direction} in price</h2>
+          <p style="margin:0 0 6px 0"><strong>From:</strong> ${fromLabel}</p>
+          <p style="margin:0 0 6px 0"><strong>To:</strong> ${toLabel}</p>
+          ${
+            boundary && boundaryPrice
+              ? `<p style="margin:0 0 6px 0"><strong>Crossed:</strong> ${boundary}-line near ~$${boundaryPrice.toFixed(2)}</p>`
+              : ""
+          }
+          <p style="margin:0 0 6px 0"><strong>Latest close:</strong> $${price.toFixed(2)} <span style="color:#666">(as of ${date})</span></p>
+          <hr style="border:none;border-top:1px solid #ddd;margin:12px 0" />
+          <p style="font-size:12px;color:#666;margin:0">Max one alert per ticker per 7 days. Not investment advice.</p>
+        </div>`;
 
-    const html = `
-      <div style="font-family:system-ui,Segoe UI,Arial,sans-serif">
-        <h2 style="margin:0 0 8px 0">${ticker} moved ${direction} in price</h2>
-        <p style="margin:0 0 6px 0"><strong>From:</strong> ${fromLabel}</p>
-        <p style="margin:0 0 6px 0"><strong>To:</strong> ${toLabel}</p>
-        ${
-          boundary && boundaryPrice
-            ? `<p style="margin:0 0 6px 0"><strong>Crossed:</strong> ${boundary}-line near ~$${boundaryPrice.toFixed(2)}</p>`
-            : ""
-        }
-        <p style="margin:0 0 6px 0"><strong>Latest close:</strong> $${price.toFixed(2)} <span style="color:#666">(as of ${date})</span></p>
-        <hr style="border:none;border-top:1px solid #ddd;margin:12px 0" />
-        <p style="font-size:12px;color:#666;margin:0">Max one alert per ticker per 7 days. Not investment advice.</p>
-      </div>`;
-
-    try {
-      console.log(`[email] ${ticker}: sending "${subject}"`);
-      await resend.emails.send({
-        from: process.env.ALERT_FROM,
-        to: process.env.ALERT_TO, // later: subscriber emails
-        subject,
-        html,
-      });
-      newState.lastEmailAt = now;
-      sent = true;
-      console.log(`[email] ${ticker}: sent`);
-    } catch (e) {
-      console.log(`[email] ${ticker}: FAILED -> ${e?.message || e}`);
-      // keep lastEmailAt unchanged so we can retry later
+      try {
+        console.log(`[email] ${ticker}: sending to ${recipients.length} subscriber(s)`);
+        await resend.emails.send({
+          from: process.env.ALERT_FROM,
+          to: recipients, // array of subscriber emails from KV
+          subject,
+          html,
+        });
+        newState.lastEmailAt = now;
+        sent = true;
+        console.log(`[email] ${ticker}: sent`);
+      } catch (e) {
+        console.log(`[email] ${ticker}: FAILED -> ${e?.message || e}`);
+        // keep lastEmailAt unchanged so we can retry later
+      }
     }
   } else {
     if (onCooldown) console.log(`[cooldown] ${ticker}: within 7 days, no email`);
