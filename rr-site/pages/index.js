@@ -21,6 +21,23 @@ export default function Home() {
   const [priceLoading, setPriceLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // lightbox state
+  const [lightboxSrc, setLightboxSrc] = useState("");
+  const openLightbox = (chartUrl) => {
+    const proxied = `/api/chart?url=${encodeURIComponent(chartUrl)}&t=${Date.now()}`;
+    setLightboxSrc(proxied);
+    document.body.style.overflow = "hidden"; // prevent background scroll
+  };
+  const closeLightbox = () => {
+    setLightboxSrc("");
+    document.body.style.overflow = "";
+  };
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && closeLightbox();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // load tickers from your Google Sheet
   async function loadTickers() {
     setLoading(true);
@@ -36,9 +53,7 @@ export default function Home() {
       setLoading(false);
     }
   }
-  useEffect(() => {
-    loadTickers();
-  }, []);
+  useEffect(() => { loadTickers(); }, []);
 
   // fetch prices (paced for free API limits)
   async function loadPrices() {
@@ -61,10 +76,7 @@ export default function Home() {
     }
     setPriceLoading(false);
   }
-  useEffect(() => {
-    loadPrices();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows.length]);
+  useEffect(() => { loadPrices(); }, [rows.length]);
 
   const hasPrices = useMemo(() => rows.some((r) => r.price != null), [rows]);
 
@@ -72,16 +84,9 @@ export default function Home() {
     <div className="container grid">
       <header className="grid">
         <h1>Risk/Reward Tracker</h1>
-        <p className="small">
-          Auto-pulls Mark’s tickers from the shared sheet. Log score 10→0 with color zones.
-        </p>
+        <p className="small">Auto-pulls Mark’s tickers from the shared sheet. Log score 10→0 with color zones.</p>
         <div className="flex-row">
-          <a
-            className="badge"
-            href={process.env.NEXT_PUBLIC_STRIPE_LINK || "#"}
-            target="_blank"
-            rel="noreferrer"
-          >
+          <a className="badge" href={process.env.NEXT_PUBLIC_STRIPE_LINK || "#"} target="_blank" rel="noreferrer">
             Subscribe – $1/month
           </a>
           <button className="btn" onClick={loadPrices} disabled={priceLoading}>
@@ -111,7 +116,7 @@ export default function Home() {
             <tbody>
               {rows.map((r) => {
                 const zone = r.score != null ? ZONE_LABEL(r.score) : null;
-                const proxied = r.chartUrl
+                const thumb = r.chartUrl
                   ? `/api/chart?url=${encodeURIComponent(r.chartUrl)}&t=${Date.now()}`
                   : "";
                 return (
@@ -120,25 +125,14 @@ export default function Home() {
                     <td className="small">{r.pickType}</td>
                     <td>${r.low.toFixed(2)}</td>
                     <td>${r.high.toFixed(2)}</td>
-                    <td>
-                      {r.price != null ? `$${Number(r.price).toFixed(2)}` : (
-                        <span className="small">loading…</span>
-                      )}
-                    </td>
+                    <td>{r.price != null ? `$${Number(r.price).toFixed(2)}` : <span className="small">loading…</span>}</td>
                     <td>{r.score != null ? r.score.toFixed(2) : "-"}</td>
+                    <td>{zone ? <span className={zone.className}>{zone.name}</span> : "-"}</td>
                     <td>
-                      {zone ? <span className={zone.className}>{zone.name}</span> : "-"}
-                    </td>
-                    <td>
-                      {proxied ? (
-                        <a href={r.chartUrl} target="_blank" rel="noreferrer">
-                          <img
-                            src={proxied}
-                            alt={`${r.ticker} chart`}
-                            className="thumb"
-                            loading="lazy"
-                          />
-                        </a>
+                      {thumb ? (
+                        <button className="thumbbtn" onClick={() => openLightbox(r.chartUrl)} aria-label={`Open ${r.ticker} chart`}>
+                          <img src={thumb} alt={`${r.ticker} chart`} className="thumb" loading="lazy" />
+                        </button>
                       ) : (
                         <span className="small">—</span>
                       )}
@@ -148,11 +142,7 @@ export default function Home() {
               })}
             </tbody>
           </table>
-          {!hasPrices && (
-            <div className="small" style={{ marginTop: 8 }}>
-              Prices load gradually to respect free data limits.
-            </div>
-          )}
+          {!hasPrices && <div className="small" style={{ marginTop: 8 }}>Prices load gradually to respect free data limits.</div>}
         </section>
       )}
 
@@ -162,6 +152,16 @@ export default function Home() {
         sources and may be delayed. Nothing here is investment advice or a recommendation, and
         this site is not affiliated with or acting on behalf of Mark. For personal entertainment only.
       </section>
+
+      {/* Lightbox */}
+      {lightboxSrc && (
+        <div className="lightbox" onClick={closeLightbox}>
+          <div className="lightbox-inner" onClick={(e) => e.stopPropagation()}>
+            <button className="lightbox-close" onClick={closeLightbox} aria-label="Close">×</button>
+            <img src={lightboxSrc} alt="Chart" className="lightbox-img" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
