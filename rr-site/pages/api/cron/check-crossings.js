@@ -124,17 +124,34 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
         </div>`;
 
       try {
-        console.log(`[email] ${ticker}: sending to ${subs.length} subscriber(s)`);
-        await resend.emails.send({
-          from: process.env.ALERT_FROM,
-          to: subs,
-          subject,
-          html,
-        });
-        newState.lastEmailAt = now;
-        sent = true;
-        console.log(`[email] ${ticker}: sent`);
-      } catch (e) {
+       console.log(
+  `[email] ${ticker}: from=${process.env.ALERT_FROM} key=${(process.env.RESEND_API_KEY || '').slice(0,8)}…`
+);
+
+let delivered = 0;
+for (const rcpt of recipients) {
+  try {
+    const resp = await resend.emails.send({
+      from: process.env.ALERT_FROM,
+      to: rcpt,            // send INDIVIDUALLY
+      subject,
+      html,
+    });
+    // resp looks like { id: 'xxx' } if Resend accepted the message
+    console.log(`[resend] accepted id=${resp?.id || 'n/a'} to=${rcpt}`);
+    delivered++;
+  } catch (err) {
+    console.log(`[resend] FAIL to=${rcpt} -> ${err?.message || err}`);
+  }
+}
+
+if (delivered > 0) {
+  newState.lastEmailAt = now;
+  sent = true;
+  console.log(`[email] ${ticker}: delivered=${delivered}/${recipients.length}`);
+} else {
+  console.log(`[email] ${ticker}: delivered=0/${recipients.length}`);
+} catch (e) {
         console.log(`[email] ${ticker}: FAILED -> ${e?.message || e}`);
       }
     }
