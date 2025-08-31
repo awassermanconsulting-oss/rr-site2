@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-// Label zones
+// Zone labels
 const ZONE_LABEL = (score) => {
   if (score >= 7) return { name: "Buy Zone", className: "badge badge-green" };
   if (score >= 5) return { name: "Below Halfway Point", className: "badge badge-yellow" };
@@ -21,6 +21,7 @@ export default function Home() {
   const [priceLoading, setPriceLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // load tickers from your Google Sheet
   async function loadTickers() {
     setLoading(true);
     setError("");
@@ -35,11 +36,9 @@ export default function Home() {
       setLoading(false);
     }
   }
+  useEffect(() => { loadTickers(); }, []);
 
-  useEffect(() => {
-    loadTickers();
-  }, []);
-
+  // fetch prices (paced for free API limits)
   async function loadPrices() {
     if (!rows.length) return;
     setPriceLoading(true);
@@ -51,9 +50,7 @@ export default function Home() {
         if (j && typeof j.price === "number") {
           setRows((prev) =>
             prev.map((row, idx) =>
-              idx === i
-                ? { ...row, price: j.price, score: scoreLog10(j.price, row.low, row.high) }
-                : row
+              idx === i ? { ...row, price: j.price, score: scoreLog10(j.price, row.low, row.high) } : row
             )
           );
         }
@@ -62,11 +59,7 @@ export default function Home() {
     }
     setPriceLoading(false);
   }
-
-  useEffect(() => {
-    loadPrices();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows.length]);
+  useEffect(() => { loadPrices(); /* on first load */ }, [rows.length]);
 
   const hasPrices = useMemo(() => rows.some((r) => r.price != null), [rows]);
 
@@ -74,16 +67,9 @@ export default function Home() {
     <div className="container grid">
       <header className="grid">
         <h1>Risk/Reward Tracker</h1>
-        <p className="small">
-          Auto-pulls Mark’s tickers from the shared sheet. Log score 10→0 with color zones.
-        </p>
+        <p className="small">Auto-pulls Mark’s tickers from the shared sheet. Log score 10→0 with color zones.</p>
         <div className="flex-row">
-          <a
-            className="badge"
-            href={process.env.NEXT_PUBLIC_STRIPE_LINK || "#"}
-            target="_blank"
-            rel="noreferrer"
-          >
+          <a className="badge" href={process.env.NEXT_PUBLIC_STRIPE_LINK || "#"} target="_blank" rel="noreferrer">
             Subscribe – $1/month
           </a>
           <button className="btn" onClick={loadPrices} disabled={priceLoading}>
@@ -113,32 +99,22 @@ export default function Home() {
             <tbody>
               {rows.map((r) => {
                 const zone = r.score != null ? ZONE_LABEL(r.score) : null;
+                const proxied = r.chartUrl
+                  ? `/api/chart?url=${encodeURIComponent(r.chartUrl)}`
+                  : "";
                 return (
                   <tr key={r.ticker}>
                     <td>{r.ticker}</td>
                     <td className="small">{r.pickType}</td>
                     <td>${r.low.toFixed(2)}</td>
                     <td>${r.high.toFixed(2)}</td>
-                    <td>
-                      {r.price != null ? `$${Number(r.price).toFixed(2)}` : (
-                        <span className="small">loading…</span>
-                      )}
-                    </td>
+                    <td>{r.price != null ? `$${Number(r.price).toFixed(2)}` : <span className="small">loading…</span>}</td>
                     <td>{r.score != null ? r.score.toFixed(2) : "-"}</td>
+                    <td>{zone ? <span className={zone.className}>{zone.name}</span> : "-"}</td>
                     <td>
-                      {zone ? <span className={zone.className}>{zone.name}</span> : "-"}
-                    </td>
-                    <td>
-                      {r.chartUrl ? (
+                      {proxied ? (
                         <a href={r.chartUrl} target="_blank" rel="noreferrer">
-                          <img
-                            src={`https://image.thum.io/get/width/360/crop/800/${encodeURIComponent(
-                              r.chartUrl
-                            )}`}
-                            alt={`${r.ticker} chart`}
-                            className="thumb"
-                            loading="lazy"
-                          />
+                          <img src={proxied} alt={`${r.ticker} chart`} className="thumb" loading="lazy" />
                         </a>
                       ) : (
                         <span className="small">—</span>
@@ -149,11 +125,7 @@ export default function Home() {
               })}
             </tbody>
           </table>
-          {!hasPrices && (
-            <div className="small" style={{ marginTop: 8 }}>
-              Prices load gradually to respect free data limits.
-            </div>
-          )}
+          {!hasPrices && <div className="small" style={{ marginTop: 8 }}>Prices load gradually to respect free data limits.</div>}
         </section>
       )}
 
