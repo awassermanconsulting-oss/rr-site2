@@ -1,68 +1,74 @@
 import { useEffect, useMemo, useState } from "react";
 
-const badgeFor = (score) => {
-  if (score >= 7) return { label: "Green", className: "badge badge-green" };
-  if (score >= 5) return { label: "Yellow", className: "badge badge-yellow" };
-  if (score >= 2) return { label: "Orange", className: "badge badge-orange" };
-  return { label: "Red", className: "badge badge-red" };
+const ZONE_LABEL = (score) => {
+  // 10–7 = Green (Buy Zone)
+  // 7–5 = Yellow (Below Halfway Point)
+  // 5–2 = Orange (Above Halfway Point)
+  // 2–0 = Red (Sell Zone)
+  if (score >= 7) return { name: "Buy Zone", className: "badge badge-green" };
+  if (score >= 5) return { name: "Below Halfway Point", className: "badge badge-yellow" };
+  if (score >= 2) return { name: "Above Halfway Point", className: "badge badge-orange" };
+  return { name: "Sell Zone", className: "badge badge-red" };
 };
 
 // Low = 10, High = 0 (log scale)
 function scoreLog10(price, low, high) {
-  // keep in bounds
   const p = Math.max(Math.min(price, high), low);
   const s = 10 * (Math.log(high / p) / Math.log(high / low));
   return Math.max(0, Math.min(10, s));
 }
 
 export default function Home() {
-  const [rows, setRows] = useState([]); // {ticker, low, high, pickType, price, score}
+  const [rows, setRows] = useState([]); // {ticker, low, high, pickType, chartUrl?, price, score}
   const [loading, setLoading] = useState(true);
+  const [priceLoading, setPriceLoading] = useState(false);
   const [error, setError] = useState("");
 
   // fetch sheet tickers
+  async function loadTickers() {
+    setLoading(true);
+    setError("");
+    try {
+      const r = await fetch("/api/tickers");
+      const { items, error } = await r.json();
+      if (error) throw new Error(error);
+      setRows(items.map((x) => ({ ...x, price: null, score: null })));
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch("/api/tickers");
-        const { items, error } = await r.json();
-        if (error) throw new Error(error);
-        setRows(items.map((x) => ({ ...x, price: null, score: null })));
-      } catch (e) {
-        setError(String(e.message || e));
-      } finally {
-        setLoading(false);
-      }
-    })();
+    loadTickers();
   }, []);
 
-  // fetch prices with pacing to respect Alpha Vantage free limits (~5/min)
+  async function loadPrices() {
+    if (!rows.length) return;
+    setPriceLoading(true);
+    // Alpha Vantage has tight free limits — pace requests.
+    for (let i = 0; i < rows.length; i++) {
+      const t = rows[i].ticker;
+      try {
+        const r = await fetch(`/api/price?symbol=${encodeURIComponent(t)}`);
+        const j = await r.json();
+        if (j && typeof j.price === "number") {
+          setRows((prev) =>
+            prev.map((row, idx) =>
+              idx === i ? { ...row, price: j.price, score: scoreLog10(j.price, row.low, row.high) } : row
+            )
+          );
+        }
+      } catch {}
+      await new Promise((res) => setTimeout(res, 1500));
+    }
+    setPriceLoading(false);
+  }
+
   useEffect(() => {
-    let cancel = false;
-    (async () => {
-      for (let i = 0; i < rows.length; i++) {
-        if (cancel) break;
-        const t = rows[i].ticker.replace(".TO", ".TRT"); // example mapping if needed
-        try {
-          const r = await fetch(`/api/price?symbol=${encodeURIComponent(t)}`);
-          const { price } = await r.json();
-          if (price) {
-            setRows((prev) =>
-              prev.map((row, idx) =>
-                idx === i
-                  ? { ...row, price, score: scoreLog10(price, row.low, row.high) }
-                  : row
-              )
-            );
-          }
-        } catch (e) {}
-        // wait ~15s between calls to be gentle on free API
-        await new Promise((res) => setTimeout(res, 1500));
-      }
-    })();
-    return () => {
-      cancel = true;
-    };
+    loadPrices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows.length]);
 
   const hasPrices = useMemo(() => rows.some((r) => r.price != null), [rows]);
@@ -71,8 +77,8 @@ export default function Home() {
     <div className="container grid">
       <header className="grid">
         <h1>Risk/Reward Tracker</h1>
-        <p className="small">Auto-pulls Mark’s tickers from the shared sheet. Colors reflect 10→0 log score.</p>
-        <div>
+        <p className="small">Auto-pulls Mark’s tickers from the shared sheet. Log score 10→0 with color zones.</p>
+        <div className="flex-row">
           <a
             className="badge"
             href={process.env.NEXT_PUBLIC_STRIPE_LINK || "#"}
@@ -81,6 +87,9 @@ export default function Home() {
           >
             Subscribe – $1/month
           </a>
+          <button className="btn" onClick={loadPrices} disabled={priceLoading}>
+            {priceLoading ? "Refreshing…" : "Refresh current prices"}
+          </button>
         </div>
       </header>
 
@@ -96,14 +105,15 @@ export default function Home() {
                 <th>Pick</th>
                 <th>Low</th>
                 <th>High</th>
-                <th>Price</th>
-                <th>Score</th>
-                <th>Status</th>
+                <th>Current Price</th>
+                <th>Current R/R Zone</th>
+                <th>Zone Label</th>
+                <th>Chart</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => {
-                const badge = r.score != null ? badgeFor(r.score) : null;
+                const zone = r.score != null ? ZONE_LABEL(r.score) : null;
                 return (
                   <tr key={r.ticker}>
                     <td>{r.ticker}</td>
@@ -112,7 +122,14 @@ export default function Home() {
                     <td>${r.high.toFixed(2)}</td>
                     <td>{r.price != null ? `$${Number(r.price).toFixed(2)}` : <span className="small">loading…</span>}</td>
                     <td>{r.score != null ? r.score.toFixed(2) : "-"}</td>
-                    <td>{badge ? <span className={badge.className}>{badge.label}</span> : "-"}</td>
+                    <td>{zone ? <span className={zone.className}>{zone.name}</span> : "-"}</td>
+                    <td>
+                      {r.chartUrl ? (
+                        <a href={r.chartUrl} target="_blank" rel="noreferrer">View</a>
+                      ) : (
+                        <span className="small">—</span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -125,6 +142,13 @@ export default function Home() {
           )}
         </section>
       )}
+
+      <section className="card small" style={{ lineHeight: 1.4 }}>
+        <strong>Disclaimer:</strong> The “Low” and “High” lines reflect values as of the original
+        publishing date and may change over time. Current prices are fetched from third-party
+        sources and may be delayed. Nothing here is investment advice or a recommendation, and
+        this site is not affiliated with or acting on behalf of Mark. For personal entertainment only.
+      </section>
     </div>
   );
 }
