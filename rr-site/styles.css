@@ -12,3 +12,7 @@ button:hover{border-color:#3a66b1}
 table{width:100%;border-collapse:collapse}
 td,th{border-bottom:1px solid #203157;padding:8px;text-align:left}
 .badge{display:inline-block;padding:4px 8px;border:1px solid #2a3a5d;border-radius:999px}
+.badge-green { border-color:#2d6a4f; color:#b7ebc6; }
+.badge-yellow { border-color:#8d6b2b; color:#ffe8a3; }
+.badge-orange { border-color:#8a4730; color:#ffc7a6; }
+.badge-red { border-color:#7d2d2d; color:#ffb3b3; }
