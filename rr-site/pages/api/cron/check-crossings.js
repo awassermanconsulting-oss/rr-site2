@@ -5,12 +5,10 @@ import { kv } from "@vercel/kv";
 import { Resend } from "resend";
 import { listSubscribers } from "../../../lib/subscribers";
 
-// Given low/high and a score S in [0..10], return the price at that score line.
-// s = 10 * log(high/p) / log(high/low)  =>  p = high / (high/low)^(s/10)
+// ---- helpers ----
 function priceAtScore(low, high, s) {
   const ratio = high / low;
-  const p = high / Math.pow(ratio, s / 10);
-  return p;
+  return high / Math.pow(ratio, s / 10);
 }
 
 // PRICE direction (not zone-index direction)
@@ -20,7 +18,6 @@ function priceDirection(fromZone, toZone) {
   return "FLAT";
 }
 
-// If zone changed, what boundary did we cross (7,5,2)?
 function crossedBoundary(fromZone, toZone) {
   if (fromZone === toZone) return null;
   const step = toZone > fromZone ? 1 : -1;
@@ -33,35 +30,60 @@ function zoneName(idx) {
   return ["Sell Zone", "Above Halfway Point", "Below Halfway Point", "Buy Zone"][idx];
 }
 
-// ---- scoring / zones (same as UI) ----
 function scoreLog(price, low, high) {
   const p = Math.max(Math.min(price, high), low);
   const s = 10 * (Math.log(high / p) / Math.log(high / low));
   return Math.max(0, Math.min(10, s));
 }
 function zoneIndex(s) {
-  if (s >= 7) return 3;      // 10–7
-  if (s >= 5) return 2;      // 7–5
-  if (s >= 2) return 1;      // 5–2
-  return 0;                  // 2–0
+  if (s >= 7) return 3;
+  if (s >= 5) return 2;
+  if (s >= 2) return 1;
+  return 0;
 }
 
 // ---- config ----
 const ALPHA = process.env.ALPHA_VANTAGE_KEY;
 const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const PER_RUN = 100; // big enough to cover all tickers in one daily run
+const PER_RUN = 4; // <<< keep under Alpha's free 5/min
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+// ---- market data (with rate-limit handling + fallback) ----
 async function getDailyClose(symbol) {
-  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(
-    symbol
-  )}&apikey=${ALPHA}&outputsize=compact`;
-  const r = await fetch(url, { cache: "no-store" });
+  const base = "https://www.alphavantage.co/query";
+  const paramsDaily = `function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(symbol)}&apikey=${ALPHA}&outputsize=compact`;
+  const r = await fetch(`${base}?${paramsDaily}`, { cache: "no-store" });
   const j = await r.json();
-  const series = j["Time Series (Daily)"];
-  if (!series) return null;
-  const [date, row] = Object.entries(series)[0];
-  return { date, close: Number(row["4. close"]) };
+
+  if (j["Time Series (Daily)"]) {
+    const [date, row] = Object.entries(j["Time Series (Daily)"])[0];
+    return { date, close: Number(row["4. close"]) };
+  }
+
+  if (j["Note"] || j["Information"]) {
+    console.log(`[alpha] rate-limited/info for ${symbol}: ${(j["Note"] || j["Information"]).slice(0, 80)}…`);
+    return { rateLimited: true };
+  }
+
+  if (j["Error Message"]) {
+    console.log(`[alpha] error for ${symbol}: ${j["Error Message"].slice(0, 80)}…`);
+    // fall through to GLOBAL_QUOTE
+  }
+
+  // Fallback: GLOBAL_QUOTE (works for many symbols where daily series is missing)
+  const paramsGq = `function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${ALPHA}`;
+  const r2 = await fetch(`${base}?${paramsGq}`, { cache: "no-store" });
+  const j2 = await r2.json();
+  const g = j2["Global Quote"];
+  if (g && g["05. price"]) {
+    // use today's date (best-effort); the price is last trade/close from AV
+    const date = new Date().toISOString().slice(0, 10);
+    return { date, close: Number(g["05. price"]) };
+  }
+
+  // No data at all
+  console.log(`[alpha] no data for ${symbol}; daily keys: ${Object.keys(j).join(",")}, gq keys: ${Object.keys(j2).join(",")}`);
+  return null;
 }
 
 async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) {
@@ -74,12 +96,12 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
   let sent = false;
 
   if (!onCooldown && process.env.RESEND_API_KEY && process.env.ALERT_FROM) {
-    const recipients = await listSubscribers();
-    if (!recipients.length) {
+    const subs = (await listSubscribers()).filter(Boolean);
+    if (!subs.length) {
       console.log("[email] no active subscribers; skipping send");
     } else {
-      const direction = priceDirection(fromZone, toZone); // "UP" | "DOWN"
-      const boundary = crossedBoundary(fromZone, toZone); // 7 | 5 | 2 | null
+      const direction = priceDirection(fromZone, toZone);
+      const boundary = crossedBoundary(fromZone, toZone);
       const boundaryPrice = boundary ? priceAtScore(low, high, boundary) : null;
 
       const fromLabel = zoneName(fromZone);
@@ -102,10 +124,10 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
         </div>`;
 
       try {
-        console.log(`[email] ${ticker}: sending to ${recipients.length} subscriber(s)`);
+        console.log(`[email] ${ticker}: sending to ${subs.length} subscriber(s)`);
         await resend.emails.send({
           from: process.env.ALERT_FROM,
-          to: recipients, // array of subscriber emails from KV
+          to: subs,
           subject,
           html,
         });
@@ -114,11 +136,10 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
         console.log(`[email] ${ticker}: sent`);
       } catch (e) {
         console.log(`[email] ${ticker}: FAILED -> ${e?.message || e}`);
-        // keep lastEmailAt unchanged so we can retry later
       }
     }
-  } else {
-    if (onCooldown) console.log(`[cooldown] ${ticker}: within 7 days, no email`);
+  } else if (onCooldown) {
+    console.log(`[cooldown] ${ticker}: within 7 days, no email`);
   }
 
   await kv.set(stateKey, newState);
@@ -136,21 +157,39 @@ export default async function handler(req, res) {
     const { items = [] } = await listResp.json();
     if (!items.length) return res.status(200).json({ processed: 0, sent: 0 });
 
+    // Optional override: run all once for manual tests: /api/cron/check-crossings?all=1
+    const forceAll = (req.query?.all === "1" || req.query?.all === "true");
+
     const total = items.length;
-    const start = (await kv.get("alert:cursor")) || 0;
-    const slice = items.slice(start, Math.min(start + PER_RUN, total));
-    const nextCursor = (start + PER_RUN) % total;
+    const start = forceAll ? 0 : (Number((await kv.get("alert:cursor")) || 0));
+    const per = forceAll ? total : Math.min(PER_RUN, total);
+    const end = start + per;
+
+    // wrap-around slice
+    const slice = end <= total
+      ? items.slice(start, end)
+      : [...items.slice(start, total), ...items.slice(0, end - total)];
+
+    let nextCursor = (start + per) % total;
 
     console.log(`[cron] processing ${slice.length}/${total} (cursor ${start} → ${nextCursor})`);
 
     let sent = 0;
+    let hitRateLimit = false;
+
     for (const it of slice) {
       const { ticker, low, high } = it;
       console.log(`[check] ${ticker}: low=${low}, high=${high}`);
+
       const latest = await getDailyClose(ticker);
-      if (!latest || !Number.isFinite(latest.close)) {
-        console.log(`[check] ${ticker}: no daily close available`);
+      if (!latest) {
+        console.log(`[check] ${ticker}: no data after fallback`);
         continue;
+      }
+      if (latest.rateLimited) {
+        hitRateLimit = true;
+        console.log(`[rate-limit] stopping early; will retry same window next run`);
+        break;
       }
 
       const s = scoreLog(latest.close, low, high);
@@ -178,9 +217,14 @@ export default async function handler(req, res) {
       }
     }
 
+    // If rate-limited, DO NOT advance cursor so we retry same window next time
+    if (hitRateLimit && !forceAll) {
+      nextCursor = start;
+    }
+
     await kv.set("alert:cursor", nextCursor);
-    console.log(`[cron] done: emails sent=${sent}`);
-    return res.status(200).json({ processed: slice.length, total, sent, nextCursor });
+    console.log(`[cron] done: emails sent=${sent}, rate_limited=${hitRateLimit}`);
+    return res.status(200).json({ processed: slice.length, total, sent, nextCursor, rate_limited: hitRateLimit });
   } catch (e) {
     console.log(`[error] ${e?.message || e}`);
     return res.status(500).json({ error: String(e?.message || e) });
