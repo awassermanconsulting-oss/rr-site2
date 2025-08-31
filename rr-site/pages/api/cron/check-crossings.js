@@ -96,23 +96,24 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
   const now = Date.now();
   const onCooldown = now - (last.lastEmailAt || 0) < COOLDOWN_MS;
 
-  // always carry forward latest close/date so UI can read from KV
-  let newState = {
-    lastZone: toZone,
-    lastEmailAt: last.lastEmailAt,
-    lastClose: price,
-    lastDate: date,
-  };
-
+  let newState = { lastZone: toZone, lastEmailAt: last.lastEmailAt };
   let sent = false;
 
   if (!onCooldown && process.env.RESEND_API_KEY && process.env.ALERT_FROM) {
-    const recipients = (await listSubscribers()).filter(Boolean);
+    // get subscribers and sanitize
+    const recipients = [
+      ...new Set(
+        (await listSubscribers())
+          .filter(Boolean)
+          .map(e => e.toLowerCase().trim())
+      ),
+    ];
+
     if (!recipients.length) {
       console.log("[email] no active subscribers; skipping send");
     } else {
-      const direction = priceDirection(fromZone, toZone);
-      const boundary = crossedBoundary(fromZone, toZone);
+      const direction = priceDirection(fromZone, toZone);  // "UP" | "DOWN"
+      const boundary = crossedBoundary(fromZone, toZone);  // 7 | 5 | 2 | null
       const boundaryPrice = boundary ? priceAtScore(low, high, boundary) : null;
 
       const fromLabel = zoneName(fromZone);
@@ -124,46 +125,41 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
           <h2 style="margin:0 0 8px 0">${ticker} moved ${direction} in price</h2>
           <p style="margin:0 0 6px 0"><strong>From:</strong> ${fromLabel}</p>
           <p style="margin:0 0 6px 0"><strong>To:</strong> ${toLabel}</p>
-          ${
-            boundary && boundaryPrice
-              ? `<p style="margin:0 0 6px 0"><strong>Crossed:</strong> ${boundary}-line near ~$${boundaryPrice.toFixed(2)}</p>`
-              : ""
-          }
+          ${boundary && boundaryPrice ? `<p style="margin:0 0 6px 0"><strong>Crossed:</strong> ${boundary}-line near ~$${boundaryPrice.toFixed(2)}</p>` : ""}
           <p style="margin:0 0 6px 0"><strong>Latest close:</strong> $${price.toFixed(2)} <span style="color:#666">(as of ${date})</span></p>
           <hr style="border:none;border-top:1px solid #ddd;margin:12px 0" />
           <p style="font-size:12px;color:#666;margin:0">Max one alert per ticker per 7 days. Not investment advice.</p>
         </div>`;
 
-      try {
-        console.log(`[email] ${ticker}: from=${process.env.ALERT_FROM} key=${(process.env.RESEND_API_KEY || "").slice(0, 8)}…`);
+      console.log(`[email] ${ticker}: from=${process.env.ALERT_FROM} to=${JSON.stringify(recipients)}`);
 
-        // Send individually for better deliverability & clearer logs
-        let delivered = 0;
-        for (const rcpt of recipients) {
-          try {
-            const resp = await resend.emails.send({
-              from: process.env.ALERT_FROM,
-              to: rcpt,
-              subject,
-              html,
-            });
-            console.log(`[resend] accepted id=${resp?.id || "n/a"} to=${rcpt}`);
+      // Send INDIVIDUALLY so each recipient is visible in Resend “Emails”
+      let delivered = 0;
+      for (const rcpt of recipients) {
+        try {
+          const { data, error } = await resend.emails.send({
+            from: process.env.ALERT_FROM,
+            to: rcpt,
+            subject,
+            html,
+          });
+          if (error) {
+            console.log(`[resend] FAIL to=${rcpt} -> ${error.message || String(error)}`);
+          } else {
+            console.log(`[resend] accepted id=${data?.id || "n/a"} to=${rcpt}`);
             delivered++;
-          } catch (err) {
-            console.log(`[resend] FAIL to=${rcpt} -> ${err?.message || err}`);
           }
+        } catch (err) {
+          console.log(`[resend] EXC to=${rcpt} -> ${err?.message || err}`);
         }
+      }
 
-        if (delivered > 0) {
-          newState.lastEmailAt = now;
-          sent = true;
-          console.log(`[email] ${ticker}: delivered=${delivered}/${recipients.length}`);
-        } else {
-          console.log(`[email] ${ticker}: delivered=0/${recipients.length}`);
-        }
-      } catch (e) {
-        console.log(`[email] ${ticker}: FAILED -> ${e?.message || e}`);
-        // keep lastEmailAt unchanged so we can retry later
+      if (delivered > 0) {
+        newState.lastEmailAt = now;
+        sent = true;
+        console.log(`[email] ${ticker}: delivered=${delivered}/${recipients.length}`);
+      } else {
+        console.log(`[email] ${ticker}: delivered=0/${recipients.length}`);
       }
     }
   } else if (onCooldown) {
@@ -173,6 +169,7 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
   await kv.set(stateKey, newState);
   return sent;
 }
+
 
 // ---------- handler ----------
 export default async function handler(req, res) {
