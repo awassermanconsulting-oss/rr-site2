@@ -34,4 +34,35 @@ td,th{border-bottom:1px solid #203157;padding:8px;text-align:left}
 @media (max-width: 720px){
   .thumb{ width:140px; height:78px; }
 }
+/* buttons & badges already added earlier… */
+
+/* thumbnail button (removes default button style) */
+.thumbbtn { border:0; padding:0; background:transparent; cursor:pointer }
+.thumb{
+  display:block;
+  width:180px;
+  height:100px;
+  object-fit:cover;
+  border-radius:8px;
+  border:1px solid #203157;
+}
+
+/* lightbox */
+.lightbox{
+  position:fixed; inset:0; background:rgba(0,0,0,.7);
+  display:flex; align-items:center; justify-content:center; z-index:1000;
+}
+.lightbox-inner{
+  position:relative; max-width:90vw; max-height:90vh; background:#0b1428; border:1px solid #2a3a5d; border-radius:12px; padding:12px;
+}
+.lightbox-img{
+  max-width:85vw; max-height:80vh; display:block; border-radius:6px;
+}
+.lightbox-close{
+  position:absolute; top:6px; right:8px; font-size:26px; line-height:26px;
+  background:transparent; color:#e6eefc; border:0; cursor:pointer;
+}
+@media (max-width: 720px){
+  .thumb{ width:140px; height:78px; }
+}
 
