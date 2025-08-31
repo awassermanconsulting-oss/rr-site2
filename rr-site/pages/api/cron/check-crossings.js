@@ -4,21 +4,24 @@
 import { kv } from "@vercel/kv";
 import { Resend } from "resend";
 
-// Score thresholds that define the zone edges
+// (optional) score thresholds that define the zone edges
 const BOUNDARIES = [7, 5, 2]; // (between 10–7, 7–5, 5–2, 2–0)
 
 // Given low/high and a score S in [0..10], return the price at that score line.
+// s = 10 * log(high/p) / log(high/low)  =>  p = high / (high/low)^(s/10)
 function priceAtScore(low, high, s) {
   const ratio = high / low;
   const p = high / Math.pow(ratio, s / 10);
   return p;
 }
 
-function directionWord(fromZone, toZone) {
-  // Higher zone index => price went DOWN (toward Buy Zone).
-  if (toZone > fromZone) return "down";
-  if (toZone < fromZone) return "up";
-  return "flat";
+// PRICE direction (not zone-index direction!)
+// Lower zone index => score went down => price went UP toward the top (0).
+// Higher zone index => score went up => price went DOWN toward the bottom (10).
+function priceDirection(fromZone, toZone) {
+  if (toZone < fromZone) return "UP";
+  if (toZone > fromZone) return "DOWN";
+  return "FLAT";
 }
 
 // If zone changed, what boundary did we cross (7,5,2)?
@@ -41,16 +44,16 @@ function scoreLog(price, low, high) {
   return Math.max(0, Math.min(10, s));
 }
 function zoneIndex(s) {
-  if (s >= 7) return 3;      // 10–7
-  if (s >= 5) return 2;      // 7–5
-  if (s >= 2) return 1;      // 5–2
-  return 0;                  // 2–0
+  if (s >= 7) return 3;      // 10–7  (Buy Zone)
+  if (s >= 5) return 2;      // 7–5   (Above Halfway Point)
+  if (s >= 2) return 1;      // 5–2   (Below Halfway Point)
+  return 0;                  // 2–0   (Sell Zone)
 }
 
 // ---- config ----
 const ALPHA = process.env.ALPHA_VANTAGE_KEY;
 const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const PER_RUN = 100; // process a few tickers per run to respect Alpha free limits
+const PER_RUN = 100; // big enough to cover all tickers in one daily run
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function getDailyClose(symbol) {
@@ -75,24 +78,28 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
   let sent = false;
 
   if (!onCooldown && process.env.RESEND_API_KEY && process.env.ALERT_FROM && process.env.ALERT_TO) {
-    const direction = directionWord(fromZone, toZone);
-    const boundary = crossedBoundary(fromZone, toZone);
+    const direction = priceDirection(fromZone, toZone); // "UP" | "DOWN" | "FLAT" (shouldn't be FLAT if we got here)
+    const boundary = crossedBoundary(fromZone, toZone); // 7 | 5 | 2 | null
     const boundaryPrice = boundary ? priceAtScore(low, high, boundary) : null;
 
-    const subject = `R/R alert: ${ticker} moved ${direction} into ${zoneName(toZone)}`;
+    const fromLabel = zoneName(fromZone);
+    const toLabel   = zoneName(toZone);
+
+    const subject = `R/R alert: ${ticker} moved ${direction} in price into ${toLabel}`;
+
     const html = `
       <div style="font-family:system-ui,Segoe UI,Arial,sans-serif">
-        <h2>${ticker} crossed into ${zoneName(toZone)}</h2>
-        <p><strong>Date:</strong> ${date}</p>
-        <p><strong>Move:</strong> ${zoneName(fromZone)} → ${zoneName(toZone)} (${direction})</p>
-        <p><strong>Latest close:</strong> $${price.toFixed(2)}</p>
+        <h2 style="margin:0 0 8px 0">${ticker} moved ${direction} in price</h2>
+        <p style="margin:0 0 6px 0"><strong>From:</strong> ${fromLabel}</p>
+        <p style="margin:0 0 6px 0"><strong>To:</strong> ${toLabel}</p>
         ${
           boundary && boundaryPrice
-            ? `<p><strong>Crossed:</strong> ${boundary} line at ~$${boundaryPrice.toFixed(2)}</p>`
+            ? `<p style="margin:0 0 6px 0"><strong>Crossed:</strong> ${boundary}-line near ~$${boundaryPrice.toFixed(2)}</p>`
             : ""
         }
-        <hr />
-        <p style="font-size:12px;color:#666">Max one alert per ticker per 7 days. Not investment advice.</p>
+        <p style="margin:0 0 6px 0"><strong>Latest close:</strong> $${price.toFixed(2)} <span style="color:#666">(as of ${date})</span></p>
+        <hr style="border:none;border-top:1px solid #ddd;margin:12px 0" />
+        <p style="font-size:12px;color:#666;margin:0">Max one alert per ticker per 7 days. Not investment advice.</p>
       </div>`;
 
     try {
@@ -125,7 +132,7 @@ export default async function handler(req, res) {
     const { items = [] } = await listResp.json();
     if (!items.length) return res.status(200).json({ processed: 0, sent: 0 });
 
-    // cursor so we only hit a few symbols per run
+    // one pass over all (PER_RUN is large)
     const total = items.length;
     const start = (await kv.get("alert:cursor")) || 0;
     const slice = items.slice(start, Math.min(start + PER_RUN, total));
@@ -155,7 +162,8 @@ export default async function handler(req, res) {
         });
         sent += didSend ? 1 : 0;
       } else {
-        await kv.set(stateKey, prev); // ensure key exists
+        // ensure state exists for first-time tickers
+        await kv.set(stateKey, prev);
       }
     }
 
