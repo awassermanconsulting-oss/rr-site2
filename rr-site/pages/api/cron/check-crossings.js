@@ -4,6 +4,36 @@
 import { kv } from "@vercel/kv";
 import { Resend } from "resend";
 
+// Score thresholds that define the zone edges
+const BOUNDARIES = [7, 5, 2]; // (between 10–7, 7–5, 5–2, 2–0)
+
+// Given low/high and a score S in [0..10], return the price at that score line.
+function priceAtScore(low, high, s) {
+  const ratio = high / low;
+  const p = high / Math.pow(ratio, s / 10);
+  return p;
+}
+
+function directionWord(fromZone, toZone) {
+  // Higher zone index => price went DOWN (toward Buy Zone).
+  if (toZone > fromZone) return "down";
+  if (toZone < fromZone) return "up";
+  return "flat";
+}
+
+// If zone changed, what boundary did we cross (7,5,2)?
+function crossedBoundary(fromZone, toZone) {
+  if (fromZone === toZone) return null;
+  const step = toZone > fromZone ? 1 : -1;
+  const edgeIndex = (toZone > fromZone ? toZone : fromZone) - (step > 0 ? 0 : 1);
+  const zoneEdgeToScore = { 3: 7, 2: 5, 1: 2 };
+  return zoneEdgeToScore[edgeIndex] ?? null;
+}
+
+function zoneName(idx) {
+  return ["Sell Zone", "Above Halfway Point", "Below Halfway Point", "Buy Zone"][idx];
+}
+
 // ---- scoring / zones (same as UI) ----
 function scoreLog(price, low, high) {
   const p = Math.max(Math.min(price, high), low);
@@ -15,9 +45,6 @@ function zoneIndex(s) {
   if (s >= 5) return 2;      // 7–5
   if (s >= 2) return 1;      // 5–2
   return 0;                  // 2–0
-}
-function zoneName(idx) {
-  return ["Sell Zone", "Above Halfway Point", "Below Halfway Point", "Buy Zone"][idx];
 }
 
 // ---- config ----
@@ -38,7 +65,7 @@ async function getDailyClose(symbol) {
   return { date, close: Number(row["4. close"]) };
 }
 
-async function maybeEmail({ ticker, fromZone, toZone, price, date }) {
+async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) {
   const stateKey = `alert:${ticker}`;
   const last = (await kv.get(stateKey)) || { lastZone: null, lastEmailAt: 0 };
   const now = Date.now();
@@ -48,13 +75,22 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date }) {
   let sent = false;
 
   if (!onCooldown && process.env.RESEND_API_KEY && process.env.ALERT_FROM && process.env.ALERT_TO) {
-    const subject = `R/R alert: ${ticker} moved ${zoneName(fromZone)} → ${zoneName(toZone)}`;
+    const direction = directionWord(fromZone, toZone);
+    const boundary = crossedBoundary(fromZone, toZone);
+    const boundaryPrice = boundary ? priceAtScore(low, high, boundary) : null;
+
+    const subject = `R/R alert: ${ticker} moved ${direction} into ${zoneName(toZone)}`;
     const html = `
       <div style="font-family:system-ui,Segoe UI,Arial,sans-serif">
         <h2>${ticker} crossed into ${zoneName(toZone)}</h2>
         <p><strong>Date:</strong> ${date}</p>
-        <p><strong>From:</strong> ${zoneName(fromZone)} → <strong>To:</strong> ${zoneName(toZone)}</p>
+        <p><strong>Move:</strong> ${zoneName(fromZone)} → ${zoneName(toZone)} (${direction})</p>
         <p><strong>Latest close:</strong> $${price.toFixed(2)}</p>
+        ${
+          boundary && boundaryPrice
+            ? `<p><strong>Crossed:</strong> ${boundary} line at ~$${boundaryPrice.toFixed(2)}</p>`
+            : ""
+        }
         <hr />
         <p style="font-size:12px;color:#666">Max one alert per ticker per 7 days. Not investment advice.</p>
       </div>`;
@@ -62,7 +98,7 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date }) {
     try {
       await resend.emails.send({
         from: process.env.ALERT_FROM,
-        to: process.env.ALERT_TO,              // later: subscriber emails
+        to: process.env.ALERT_TO, // later: subscriber emails
         subject,
         html,
       });
@@ -114,6 +150,8 @@ export default async function handler(req, res) {
           toZone: z,
           price: latest.close,
           date: latest.date,
+          low,
+          high,
         });
         sent += didSend ? 1 : 0;
       } else {
