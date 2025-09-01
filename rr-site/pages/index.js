@@ -87,7 +87,7 @@ export default function Home() {
         <p className="small"> Log score 10→0 with color zones.</p>
         <div className="flex-row">
           <a className="badge" href={process.env.NEXT_PUBLIC_STRIPE_LINK || "#"} target="_blank" rel="noreferrer">
-            Subscribe - Free
+            Subscribe For 3 Point Alerts & Future Launch Announcements - Free
           </a>
           <button className="btn" onClick={loadPrices} disabled={priceLoading}>
             {priceLoading ? "Refreshing…" : "Refresh current prices"}
