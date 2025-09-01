@@ -1,8 +1,10 @@
 // pages/api/cron/check-crossings.js
-
-// Per-ticker zone-change alerts with a 7-day cooldown.
-// Stores the latest close/date in KV so the UI can read prices without
-// hammering Alpha Vantage (fixes "loading..." in the table).
+//
+// Zone-change alerts with a 7-day cooldown.
+// NEW: prefers `price` coming from /api/tickers (your Google Sheet) and
+// only falls back to Alpha Vantage when that price is missing.
+// Also stores last close/date to KV so the UI can read a fresh number
+// without hammering any price API.
 
 import { kv } from "@vercel/kv";
 import { Resend } from "resend";
@@ -47,9 +49,9 @@ function zoneIndex(s) {
 }
 
 // ---------- config ----------
-const ALPHA = process.env.ALPHA_VANTAGE_KEY;
-const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const PER_RUN = 4; // keep under Alpha free 5/min
+const ALPHA = process.env.ALPHA_VANTAGE_KEY;            // only used for fallback
+const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;            // 7 days
+const PER_RUN = 100;                                    // process all; safe if sheet gives price
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ---------- market data with fallback ----------
@@ -73,7 +75,7 @@ async function getDailyClose(symbol) {
     return { rateLimited: true };
   }
 
-  // Fallback: GLOBAL_QUOTE (many symbols, incl. some OTC)
+  // Fallback: GLOBAL_QUOTE (often works for OTC)
   const r2 = await fetch(
     `${base}?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${ALPHA}`,
     { cache: "no-store" }
@@ -124,34 +126,25 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
           <p style="margin:0 0 6px 0"><strong>To:</strong> ${toLabel}</p>
           ${
             boundary && boundaryPrice
-              ? `<p style="margin:0 0 6px 0"><strong>Crossed:</strong> ${boundary}-line near ~$${boundaryPrice.toFixed(
-                  2
-                )}</p>`
+              ? `<p style="margin:0 0 6px 0"><strong>Crossed:</strong> ${boundary}-line near ~$${boundaryPrice.toFixed(2)}</p>`
               : ""
           }
-          <p style="margin:0 0 6px 0"><strong>Latest close:</strong> $${price.toFixed(
-            2
-          )} <span style="color:#666">(as of ${date})</span></p>
+          <p style="margin:0 0 6px 0"><strong>Latest close:</strong> $${price.toFixed(2)} <span style="color:#666">(as of ${date})</span></p>
           <hr style="border:none;border-top:1px solid #ddd;margin:12px 0" />
           <p style="font-size:12px;color:#666;margin:0">Max one alert per ticker per 7 days. Not investment advice.</p>
         </div>`;
 
-      console.log(
-        `[email] ${ticker}: from=${process.env.ALERT_FROM} to=${JSON.stringify(recipients)}`
-      );
+      console.log(`[email] ${ticker}: from=${process.env.ALERT_FROM} to=${JSON.stringify(recipients)}`);
 
       let delivered = 0;
-
       for (const rcpt of recipients) {
         try {
-          // Resend SDK returns { data, error }
           const { data, error } = await resend.emails.send({
             from: process.env.ALERT_FROM,
-            to: rcpt, // send INDIVIDUALLY (better deliverability + clearer logs)
+            to: rcpt, // send individually (cleaner logs + deliverability)
             subject,
             html,
           });
-
           if (error) {
             console.log(`[resend] FAIL to=${rcpt} -> ${JSON.stringify(error)}`);
           } else {
@@ -160,11 +153,8 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
           }
         } catch (err) {
           let dump;
-          try {
-            dump = JSON.stringify(err, Object.getOwnPropertyNames(err));
-          } catch {
-            dump = String(err);
-          }
+          try { dump = JSON.stringify(err, Object.getOwnPropertyNames(err)); }
+          catch { dump = String(err); }
           console.log(`[resend] FAIL to=${rcpt} -> ${dump}`);
         }
       }
@@ -185,11 +175,9 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
   return sent;
 }
 
-
 // ---------- handler ----------
 export default async function handler(req, res) {
   try {
-    if (!ALPHA) return res.status(500).json({ error: "Missing ALPHA_VANTAGE_KEY" });
     if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN)
       return res.status(500).json({ error: "Vercel KV env vars missing" });
 
@@ -198,7 +186,6 @@ export default async function handler(req, res) {
     const { items = [] } = await listResp.json();
     if (!items.length) return res.status(200).json({ processed: 0, sent: 0 });
 
-    // Manual override to process all at once: /api/cron/check-crossings?all=1
     const forceAll = req.query?.all === "1" || req.query?.all === "true";
 
     const total = items.length;
@@ -206,11 +193,9 @@ export default async function handler(req, res) {
     const per = forceAll ? total : Math.min(PER_RUN, total);
     const end = start + per;
 
-    // wrap-around slice
-    const slice =
-      end <= total
-        ? items.slice(start, end)
-        : [...items.slice(start, total), ...items.slice(0, end - total)];
+    const slice = end <= total
+      ? items.slice(start, end)
+      : [...items.slice(start, total), ...items.slice(0, end - total)];
 
     let nextCursor = (start + per) % total;
 
@@ -223,22 +208,31 @@ export default async function handler(req, res) {
       const { ticker, low, high } = it;
       console.log(`[check] ${ticker}: low=${low}, high=${high}`);
 
-      const latest = await getDailyClose(ticker);
-      if (!latest) {
-        console.log(`[check] ${ticker}: no data after fallback`);
-        continue;
-      }
-      if (latest.rateLimited) {
-        hitRateLimit = true;
-        console.log(`[rate-limit] stopping early; will retry same window next run`);
-        break;
+      // Prefer sheet price if present; fall back to Alpha only when missing
+      let latest;
+      const sheetPrice = Number(it?.price);
+      if (Number.isFinite(sheetPrice)) {
+        latest = { date: new Date().toISOString().slice(0, 10), close: sheetPrice };
+      } else {
+        if (!process.env.ALPHA_VANTAGE_KEY) {
+          console.log(`[check] ${ticker}: no sheet price and no ALPHA_VANTAGE_KEY; skipping`);
+          continue;
+        }
+        latest = await getDailyClose(ticker);
+        if (!latest) {
+          console.log(`[check] ${ticker}: no data after fallback`);
+          continue;
+        }
+        if (latest.rateLimited) {
+          hitRateLimit = true;
+          console.log(`[rate-limit] stopping early; will retry same window next run`);
+          break;
+        }
       }
 
       const s = scoreLog(latest.close, low, high);
       const z = zoneIndex(s);
-      console.log(
-        `[score] ${ticker}: close=$${latest.close.toFixed(2)} score=${s.toFixed(2)} zone=${zoneName(z)}`
-      );
+      console.log(`[score] ${ticker}: close=$${latest.close.toFixed(2)} score=${s.toFixed(2)} zone=${zoneName(z)}`);
 
       const stateKey = `alert:${ticker}`;
       const prev = (await kv.get(stateKey)) || { lastZone: z, lastEmailAt: 0 };
@@ -256,7 +250,7 @@ export default async function handler(req, res) {
         });
         sent += didSend ? 1 : 0;
       } else {
-        // even if zone didn't change, store the fresh close/date for the UI
+        // store fresh price even if no zone change
         await kv.set(stateKey, {
           lastZone: z,
           lastEmailAt: prev.lastEmailAt || 0,
@@ -267,14 +261,17 @@ export default async function handler(req, res) {
       }
     }
 
-    // If rate-limited, keep cursor where it is so we retry the same window
     if (hitRateLimit && !forceAll) nextCursor = start;
 
     await kv.set("alert:cursor", nextCursor);
     console.log(`[cron] done: emails sent=${sent}, rate_limited=${hitRateLimit}`);
-    return res
-      .status(200)
-      .json({ processed: slice.length, total, sent, nextCursor, rate_limited: hitRateLimit });
+    return res.status(200).json({
+      processed: slice.length,
+      total,
+      sent,
+      nextCursor,
+      rate_limited: hitRateLimit,
+    });
   } catch (e) {
     console.log(`[error] ${e?.message || e}`);
     return res.status(500).json({ error: String(e?.message || e) });
