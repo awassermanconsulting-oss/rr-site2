@@ -1,51 +1,61 @@
-export const config = { api: { bodyParser: false } };
-
+import { kv } from "@vercel/kv";
 import Stripe from "stripe";
 import getRawBody from "raw-body";
-import { addSubscriber, removeSubscriber } from "../../../lib/subscribers";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", { apiVersion: "2024-06-20" });
+export const config = { api: { bodyParser: false } };
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: "2023-10-16",
+});
+
+const SUBS_KEY = "subs:active";
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).end("Method Not Allowed");
-  const sig = req.headers["stripe-signature"];
-  let event;
+  if (req.method !== "POST") return res.status(405).end("Method not allowed");
 
+  let event;
   try {
-    const buf = await getRawBody(req);
-    event = stripe.webhooks.constructEvent(buf, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    const raw = await getRawBody(req);
+    const sig = req.headers["stripe-signature"];
+    const secret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!sig || !secret) return res.status(500).send("Missing webhook secret");
+    event = stripe.webhooks.constructEvent(raw, sig, secret);
   } catch (err) {
+    console.log("[stripe] signature verification failed:", err?.message || err);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   try {
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
-      const email = session.customer_details?.email || session.customer_email;
-      if (email) await addSubscriber(email);
-    }
+    switch (event.type) {
+      case "checkout.session.completed": {
+        const session = event.data.object;
 
-    if (event.type === "customer.subscription.updated") {
-      const sub = event.data.object;
-      const email = sub?.customer_email || sub?.customer_details?.email; // sometimes absent
-      const status = sub?.status; // 'active', 'trialing', 'past_due', 'canceled', etc.
-      if (email) {
-        if (status === "canceled" || status === "unpaid" || status === "incomplete_expired") {
-          await removeSubscriber(email);
+        const email =
+          session?.customer_details?.email || session?.customer_email || null;
+
+        if (email) {
+          const e = String(email).trim().toLowerCase();
+          await kv.sadd(SUBS_KEY, e);
+          console.log(`[webhook] added subscriber: ${e}`);
+
+          // Save the Stripe customer id for Billing Portal (works even for $0 checkouts)
+          if (session.customer) {
+            await kv.set(`cust:${e}`, session.customer);
+            await kv.set(`email_by_customer:${session.customer}`, e);
+          }
         } else {
-          await addSubscriber(email);
+          console.log("[webhook] no email on session; skipping");
         }
+        break;
       }
+      default:
+        // ignore others
+        break;
     }
 
-    if (event.type === "customer.subscription.deleted") {
-      const sub = event.data.object;
-      const email = sub?.customer_email || sub?.customer_details?.email;
-      if (email) await removeSubscriber(email);
-    }
-
-    return res.status(200).json({ received: true });
-  } catch (e) {
-    return res.status(500).json({ error: e?.message || String(e) });
+    return res.json({ received: true });
+  } catch (err) {
+    console.log("[stripe] handler error:", err?.message || err);
+    return res.status(500).send("Webhook handler error");
   }
 }
