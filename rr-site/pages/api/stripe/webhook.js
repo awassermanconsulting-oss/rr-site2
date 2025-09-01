@@ -9,6 +9,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 });
 
 const SUBS_KEY = "subs:active";
+const UNSUB_KEY = "subs:unsubscribed";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end("Method not allowed");
@@ -30,12 +31,29 @@ export default async function handler(req, res) {
       case "checkout.session.completed": {
         const session = event.data.object;
 
-        const email =
-          session?.customer_details?.email || session?.customer_email || null;
+        let email =
+          session?.customer_details?.email ||
+          session?.customer_email ||
+          null;
+
+        // For some zero-dollar checkouts, the email may only be available on the
+        // associated customer object, so fetch it if needed.
+        if (!email && session?.customer) {
+          try {
+            const customer = await stripe.customers.retrieve(session.customer);
+            email = customer?.email || null;
+          } catch (err) {
+            console.log(
+              "[webhook] failed to retrieve customer:",
+              err?.message || err
+            );
+          }
+        }
 
         if (email) {
           const e = String(email).trim().toLowerCase();
           await kv.sadd(SUBS_KEY, e);
+          await kv.srem(UNSUB_KEY, e);
           console.log(`[webhook] added subscriber: ${e}`);
 
           // Save the Stripe customer id for Billing Portal (works even for $0 checkouts)
