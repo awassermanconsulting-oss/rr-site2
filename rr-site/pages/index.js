@@ -87,7 +87,7 @@ export default function Home() {
         <p className="small">Auto-pulls Mark’s tickers from the shared sheet. Log score 10→0 with color zones.</p>
         <div className="flex-row">
           <a className="badge" href={process.env.NEXT_PUBLIC_STRIPE_LINK || "#"} target="_blank" rel="noreferrer">
-            Subscribe – $1/month
+            Subscribe - Free
           </a>
           <button className="btn" onClick={loadPrices} disabled={priceLoading}>
             {priceLoading ? "Refreshing…" : "Refresh current prices"}
