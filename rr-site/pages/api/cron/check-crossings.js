@@ -20,16 +20,29 @@ function priceDirection(fromZone, toZone) {
   return "FLAT";
 }
 
-// Return the score line crossed (one of 10, 7, 5, 3, 0) or null
+// Return the boundary score actually crossed (10, 7, 5, 3, 0) or null
+function boundaryBetween(hiIdx) {
+  // boundary identified by the *upper* zone index of the adjacent pair
+  // 5↔4 => 10, 4↔3 => 7, 3↔2 => 5, 2↔1 => 3, 1↔0 => 0
+  switch (hiIdx) {
+    case 5: return 10;
+    case 4: return 7;
+    case 3: return 5;
+    case 2: return 3;
+    case 1: return 0;
+    default: return null;
+  }
+}
 function crossedBoundary(fromZone, toZone) {
   if (fromZone === toZone) return null;
-  const step = toZone > fromZone ? 1 : -1;
-  // Map "upper" zone index of the boundary to its score line
-  // Boundaries between:
-  // 5↔4 => 10, 4↔3 => 7, 3↔2 => 5, 2↔1 => 3, 1↔0 => 0
-  const zoneEdgeToScore = { 5: 10, 4: 7, 3: 5, 2: 3, 1: 0 };
-  const upperSide = (toZone > fromZone ? toZone : fromZone) - (step > 0 ? 0 : 1);
-  return zoneEdgeToScore[upperSide] ?? null;
+  // We only report the FIRST boundary crossed in the move direction.
+  if (toZone < fromZone) {
+    // moved UP in price (down in score), e.g. 5 -> 4 -> 3...
+    return boundaryBetween(fromZone);
+  } else {
+    // moved DOWN in price (up in score), e.g. 2 -> 3 -> 4...
+    return boundaryBetween(fromZone + 1);
+  }
 }
 
 function zoneName(idx) {
@@ -79,7 +92,9 @@ async function getDailyClose(symbol) {
   }
 
   if (j["Note"] || j["Information"]) {
-    console.log(`[alpha] rate-limited/info for ${symbol}: ${(j["Note"] || j["Information"]).slice(0, 80)}…`);
+    console.log(
+      `[alpha] rate-limited/info for ${symbol}: ${(j["Note"] || j["Information"]).slice(0, 80)}…`
+    );
     return { rateLimited: true };
   }
 
