@@ -1,18 +1,21 @@
 import { kv } from "@vercel/kv";
 
-const SET_ACTIVE = "subs:active";
+const KEY = "subs:active";
+
+export async function listSubscribers() {
+  const vals = await kv.smembers(KEY);
+  return (vals || []).filter(Boolean);
+}
 
 export async function addSubscriber(email) {
-  if (!email) return;
-  await kv.sadd(SET_ACTIVE, email.toLowerCase());
+  const e = String(email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw new Error("Invalid email");
+  await kv.sadd(KEY, e);
+  return e;
 }
 
 export async function removeSubscriber(email) {
-  if (!email) return;
-  await kv.srem(SET_ACTIVE, email.toLowerCase());
-}
-
-export async function listSubscribers() {
-  const members = await kv.smembers(SET_ACTIVE);
-  return Array.isArray(members) ? members : [];
+  const e = String(email || "").trim().toLowerCase();
+  await kv.srem(KEY, e);
+  return e;
 }
