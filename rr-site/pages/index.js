@@ -84,7 +84,7 @@ export default function Home() {
     <div className="container grid">
       <header className="grid">
         <h1>Risk/Reward Tracker</h1>
-        <p className="small">Auto-pulls Mark’s tickers from the shared sheet. Log score 10→0 with color zones.</p>
+        <p className="small"> Log score 10→0 with color zones.</p>
         <div className="flex-row">
           <a className="badge" href={process.env.NEXT_PUBLIC_STRIPE_LINK || "#"} target="_blank" rel="noreferrer">
             Subscribe - Free
