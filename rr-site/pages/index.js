@@ -152,7 +152,9 @@ export default function Home() {
         <strong>Disclaimer:</strong> The “Low” and “High” lines reflect values as of the original
         publishing date and may change over time. Current prices are fetched from third-party
         sources and may be delayed. Nothing here is investment advice or a recommendation, and
-        this site is not affiliated with or acting on behalf of Mark. For personal entertainment only.
+        this site is not affiliated with or acting on behalf of Mark. For personal entertainment only. 
+        All numbers are completely fictional. Any resemblence to actual numbers is coincidence & not guaranteed. 
+    
       </section>
 
       {/* Lightbox */}
