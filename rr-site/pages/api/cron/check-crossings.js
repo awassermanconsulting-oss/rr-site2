@@ -20,28 +20,44 @@ function priceDirection(fromZone, toZone) {
   return "FLAT";
 }
 
+// Return the score line crossed (one of 10, 7, 5, 3, 0) or null
 function crossedBoundary(fromZone, toZone) {
   if (fromZone === toZone) return null;
   const step = toZone > fromZone ? 1 : -1;
-  const edgeIndex = (toZone > fromZone ? toZone : fromZone) - (step > 0 ? 0 : 1);
-  const zoneEdgeToScore = { 3: 7, 2: 5, 1: 2 };
-  return zoneEdgeToScore[edgeIndex] ?? null;
+  // Map "upper" zone index of the boundary to its score line
+  // Boundaries between:
+  // 5↔4 => 10, 4↔3 => 7, 3↔2 => 5, 2↔1 => 3, 1↔0 => 0
+  const zoneEdgeToScore = { 5: 10, 4: 7, 3: 5, 2: 3, 1: 0 };
+  const upperSide = (toZone > fromZone ? toZone : fromZone) - (step > 0 ? 0 : 1);
+  return zoneEdgeToScore[upperSide] ?? null;
 }
 
 function zoneName(idx) {
-  return ["Sell Zone", "Above Halfway Point", "Below Halfway Point", "Buy Zone"][idx];
+  // 0..5 (low->high scores)
+  return ["OUT", "Sell Zone", "Above Halfway Point", "Below Halfway Point", "Buy Zone", "BUY"][idx];
 }
 
+// ---- scoring / zones ----
 function scoreLog(price, low, high) {
   const p = Math.max(Math.min(price, high), low);
   const s = 10 * (Math.log(high / p) / Math.log(high / low));
   return Math.max(0, Math.min(10, s));
 }
+
+// New 6-zone scheme:
+// 10 -> BUY (idx 5)
+// [7, 9.999...] -> Buy Zone (idx 4)
+// [5, 7) -> Below Halfway (idx 3)
+// [3, 5) -> Above Halfway (idx 2)
+// (0, 3) -> Sell Zone (idx 1)
+// 0 -> OUT (idx 0)
 function zoneIndex(s) {
-  if (s >= 7) return 3;      // 10–7  (Buy Zone)
-  if (s >= 5) return 2;      // 7–5   (Below Halfway Point)
-  if (s >= 2) return 1;      // 5–2   (Above Halfway Point)
-  return 0;                  // 2–0   (Sell Zone)
+  if (s >= 9.999) return 5;      // 10 (BUY)
+  if (s >= 7)     return 4;      // 9.99–7
+  if (s >= 5)     return 3;      // 6.99–5
+  if (s >= 3)     return 2;      // 5–3
+  if (s > 0)      return 1;      // 2.99–0
+  return 0;                      // 0 (OUT)
 }
 
 // ---------- config ----------
@@ -96,8 +112,8 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
       console.log("[email] no active subscribers; skipping send");
     } else {
       const direction = priceDirection(fromZone, toZone); // "UP" | "DOWN"
-      const boundary = crossedBoundary(fromZone, toZone); // 7 | 5 | 2 | null
-      const boundaryPrice = boundary ? priceAtScore(low, high, boundary) : null;
+      const boundary = crossedBoundary(fromZone, toZone); // 10 | 7 | 5 | 3 | 0 | null
+      const boundaryPrice = Number.isFinite(boundary) ? priceAtScore(low, high, boundary) : null;
 
       const fromLabel = zoneName(fromZone);
       const toLabel   = zoneName(toZone);
@@ -115,7 +131,7 @@ async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) 
             <p style="margin:0 0 6px 0"><strong>From:</strong> ${fromLabel}</p>
             <p style="margin:0 0 6px 0"><strong>To:</strong> ${toLabel}</p>
             ${
-              boundary && boundaryPrice
+              Number.isFinite(boundary) && boundaryPrice
                 ? `<p style="margin:0 0 6px 0"><strong>Crossed:</strong> ${boundary}-line near ~$${boundaryPrice.toFixed(2)}</p>`
                 : ""
             }
