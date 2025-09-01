@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 
-// Zone labels
+// Zone labels (NEW 6-zone scheme)
 const ZONE_LABEL = (score) => {
-  if (score >= 7) return { name: "Buy Zone", className: "badge badge-green" };
-  if (score >= 5) return { name: "Below Halfway Point", className: "badge badge-yellow" };
-  if (score >= 2) return { name: "Above Halfway Point", className: "badge badge-orange" };
-  return { name: "Sell Zone", className: "badge badge-red" };
+  if (score >= 9.999) return { name: "BUY", className: "badge badge-green" };                 // 10
+  if (score >= 7)     return { name: "Buy Zone", className: "badge badge-green" };            // 9.99–7
+  if (score >= 5)     return { name: "Below Halfway Point", className: "badge badge-yellow" };// 6.99–5
+  if (score >= 3)     return { name: "Above Halfway Point", className: "badge badge-orange" };// 5–3
+  if (score > 0)      return { name: "Sell Zone", className: "badge badge-red" };             // 2.99–0
+  return { name: "OUT", className: "badge badge-red" };                                       // 0
 };
 
 // Low = 10, High = 0 (log scale)
@@ -87,7 +89,7 @@ export default function Home() {
         <p className="small"> Log score 10→0 with color zones.</p>
         <div className="flex-row">
           <a className="badge" href={process.env.NEXT_PUBLIC_STRIPE_LINK || "#"} target="_blank" rel="noreferrer">
-            Subscribe For 3 Point Alerts & Future Launch Announcements - Free
+            Subscribe free - Email zone label alerts & future launches
           </a>
           <button className="btn" onClick={loadPrices} disabled={priceLoading}>
             {priceLoading ? "Refreshing…" : "Refresh current prices"}
