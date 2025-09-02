@@ -22,6 +22,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [priceLoading, setPriceLoading] = useState(false);
   const [error, setError] = useState("");
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
 
   // lightbox state
   const [lightboxSrc, setLightboxSrc] = useState("");
@@ -81,6 +82,52 @@ export default function Home() {
   useEffect(() => { loadPrices(); }, [rows.length]);
 
   const hasPrices = useMemo(() => rows.some((r) => r.price != null), [rows]);
+  const sortedRows = useMemo(() => {
+    const sortable = [...rows];
+    const { key, direction } = sortConfig;
+    if (!key) return sortable;
+    return sortable.sort((a, b) => {
+      const getVal = (row) => {
+        switch (key) {
+          case "ticker":
+            return row.ticker;
+          case "pickType":
+            return row.pickType;
+          case "low":
+            return row.low;
+          case "high":
+            return row.high;
+          case "price":
+            return row.price;
+          case "score":
+            return row.score;
+          case "gain":
+            return row.price != null ? ((row.high - row.price) / row.price) * 100 : null;
+          case "zoneLabel":
+            return row.score != null ? ZONE_LABEL(row.score).name : null;
+          default:
+            return null;
+        }
+      };
+      const valA = getVal(a);
+      const valB = getVal(b);
+      if (valA == null) return 1;
+      if (valB == null) return -1;
+      if (typeof valA === "string") {
+        return direction === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      }
+      return direction === "asc" ? valA - valB : valB - valA;
+    });
+  }, [rows, sortConfig]);
+
+  const requestSort = (key) => {
+    setSortConfig((prev) => {
+      if (prev.key === key) {
+        return { key, direction: prev.direction === "asc" ? "desc" : "asc" };
+      }
+      return { key, direction: "asc" };
+    });
+  };
 
   return (
     <div className="container grid">
@@ -105,18 +152,19 @@ export default function Home() {
           <table>
             <thead>
               <tr>
-                <th>Ticker</th>
-                <th>Pick</th>
-                <th>Low</th>
-                <th>High</th>
-                <th>Current Price</th>
-                <th>Current R/R Zone</th>
-                <th>Zone Label</th>
+                <th className="sortable" onClick={() => requestSort("ticker")}>Ticker</th>
+                <th className="sortable" onClick={() => requestSort("pickType")}>Pick</th>
+                <th className="sortable" onClick={() => requestSort("low")}>Low</th>
+                <th className="sortable" onClick={() => requestSort("high")}>High</th>
+                <th className="sortable" onClick={() => requestSort("gain")}>Potential % Gain</th>
+                <th className="sortable" onClick={() => requestSort("price")}>Current Price</th>
+                <th className="sortable" onClick={() => requestSort("score")}>Current R/R Zone</th>
+                <th className="sortable" onClick={() => requestSort("zoneLabel")}>Zone Label</th>
                 <th>Chart</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {sortedRows.map((r) => {
                 const zone = r.score != null ? ZONE_LABEL(r.score) : null;
                 const thumb = r.chartUrl
                   ? `/api/chart?url=${encodeURIComponent(r.chartUrl)}&t=${Date.now()}`
@@ -127,6 +175,11 @@ export default function Home() {
                     <td className="small">{r.pickType}</td>
                     <td>${r.low.toFixed(2)}</td>
                     <td>${r.high.toFixed(2)}</td>
+                    <td>
+                      {r.price != null
+                        ? `${(((r.high - r.price) / r.price) * 100).toFixed(2)}%`
+                        : <span className="small">-</span>}
+                    </td>
                     <td>{r.price != null ? `$${Number(r.price).toFixed(2)}` : <span className="small">loading…</span>}</td>
                     <td>{r.score != null ? r.score.toFixed(2) : "-"}</td>
                     <td>{zone ? <span className={zone.className}>{zone.name}</span> : "-"}</td>
