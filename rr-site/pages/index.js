@@ -1,20 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 
-// Zone labels (NEW 6-zone scheme)
-const ZONE_LABEL = (score) => {
-  if (score >= 9.999) return { name: "BUY", className: "badge badge-green" };                 // 10
-  if (score >= 7)     return { name: "Buy Zone", className: "badge badge-green" };            // 9.99–7
-  if (score >= 5)     return { name: "Below Halfway Point", className: "badge badge-yellow" };// 6.99–5
-  if (score >= 3)     return { name: "Above Halfway Point", className: "badge badge-orange" };// 5–3
-  if (score > 0)      return { name: "Sell Zone", className: "badge badge-red" };             // 2.99–0
-  return { name: "OUT", className: "badge badge-red" };                                       // 0
-};
-
 // Low = 10, High = 0 (log scale)
 function scoreLog10(price, low, high) {
   const p = Math.max(Math.min(price, high), low);
   const s = 10 * (Math.log(high / p) / Math.log(high / low));
   return Math.max(0, Math.min(10, s));
+}
+
+function priceFromScore(score, low, high) {
+  return high / Math.pow(high / low, score / 10);
 }
 
 export default function Home() {
@@ -23,6 +17,9 @@ export default function Home() {
   const [priceLoading, setPriceLoading] = useState(false);
   const [error, setError] = useState("");
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
+  const [calcTicker, setCalcTicker] = useState("");
+  const [buyPrice, setBuyPrice] = useState("");
+  const [calcResult, setCalcResult] = useState(null);
 
   // lightbox state
   const [lightboxSrc, setLightboxSrc] = useState("");
@@ -103,8 +100,6 @@ export default function Home() {
             return row.score;
           case "gain":
             return row.price != null ? ((row.high - row.price) / row.price) * 100 : null;
-          case "zoneLabel":
-            return row.score != null ? ZONE_LABEL(row.score).name : null;
           default:
             return null;
         }
@@ -126,6 +121,22 @@ export default function Home() {
         return { key, direction: prev.direction === "asc" ? "desc" : "asc" };
       }
       return { key, direction: "asc" };
+    });
+  };
+
+  const handleCalc = () => {
+    const row = rows.find((r) => r.ticker === calcTicker);
+    const price = parseFloat(buyPrice);
+    if (!row || isNaN(price)) {
+      setCalcResult(null);
+      return;
+    }
+    const currentScore = scoreLog10(price, row.low, row.high);
+    const upScore = Math.min(currentScore + 3, 10);
+    const downScore = Math.max(currentScore - 3, 0);
+    setCalcResult({
+      up: priceFromScore(upScore, row.low, row.high),
+      down: priceFromScore(downScore, row.low, row.high),
     });
   };
 
@@ -158,14 +169,12 @@ export default function Home() {
                 <th className="sortable" onClick={() => requestSort("high")}>High</th>
                 <th className="sortable" onClick={() => requestSort("gain")}>Potential % Gain</th>
                 <th className="sortable" onClick={() => requestSort("price")}>Current Price</th>
-                <th className="sortable" onClick={() => requestSort("score")}>Current R/R Zone</th>
-                <th className="sortable" onClick={() => requestSort("zoneLabel")}>Zone Label</th>
+                <th className="sortable" onClick={() => requestSort("score")}>R/R Level</th>
                 <th>Chart</th>
               </tr>
             </thead>
             <tbody>
               {sortedRows.map((r) => {
-                const zone = r.score != null ? ZONE_LABEL(r.score) : null;
                 const thumb = r.chartUrl
                   ? `/api/chart?url=${encodeURIComponent(r.chartUrl)}&t=${Date.now()}`
                   : "";
@@ -182,7 +191,6 @@ export default function Home() {
                     </td>
                     <td>{r.price != null ? `$${Number(r.price).toFixed(2)}` : <span className="small">loading…</span>}</td>
                     <td>{r.score != null ? r.score.toFixed(2) : "-"}</td>
-                    <td>{zone ? <span className={zone.className}>{zone.name}</span> : "-"}</td>
                     <td>
                       {thumb ? (
                         <button className="thumbbtn" onClick={() => openLightbox(r.chartUrl)} aria-label={`Open ${r.ticker} chart`}>
@@ -198,6 +206,44 @@ export default function Home() {
             </tbody>
           </table>
           {!hasPrices && <div className="small" style={{ marginTop: 8 }}>Prices load gradually to respect free data limits.</div>}
+        </section>
+      )}
+
+      {!!rows.length && (
+        <section className="card" style={{ marginTop: 16 }}>
+          <h2>R/R Move Calculator</h2>
+          <div>
+            <label>
+              Stock:
+              <select value={calcTicker} onChange={(e) => setCalcTicker(e.target.value)}>
+                <option value="">Select a stock</option>
+                {rows.map((r) => (
+                  <option key={r.ticker} value={r.ticker}>
+                    {r.ticker}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div>
+            <label>
+              Buy price:
+              <input
+                type="number"
+                value={buyPrice}
+                onChange={(e) => setBuyPrice(e.target.value)}
+              />
+            </label>
+          </div>
+          <button className="btn" onClick={handleCalc} style={{ marginTop: 8 }}>
+            Calculate
+          </button>
+          {calcResult && (
+            <div style={{ marginTop: 8 }}>
+              <div>3-point move up: ${calcResult.up.toFixed(2)}</div>
+              <div>3-point move down: ${calcResult.down.toFixed(2)}</div>
+            </div>
+          )}
         </section>
       )}
 
