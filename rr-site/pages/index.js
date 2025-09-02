@@ -168,8 +168,8 @@ export default function Home() {
                 <th className="sortable" onClick={() => requestSort("pickType")}>Pick</th>
                 <th className="sortable" onClick={() => requestSort("low")}>Low</th>
                 <th className="sortable" onClick={() => requestSort("high")}>High</th>
-                <th className="sortable" onClick={() => requestSort("gain")}>Potential % Gain</th>
                 <th className="sortable" onClick={() => requestSort("price")}>Current Price</th>
+                <th className="sortable" onClick={() => requestSort("gain")}>Potential % Gain</th>
                 <th className="sortable" onClick={() => requestSort("score")}>R/R Level</th>
                 <th>Chart</th>
               </tr>
@@ -185,12 +185,12 @@ export default function Home() {
                     <td className="small">{r.pickType}</td>
                     <td>${r.low.toFixed(2)}</td>
                     <td>${r.high.toFixed(2)}</td>
+                    <td>{r.price != null ? `$${Number(r.price).toFixed(2)}` : <span className="small">loading…</span>}</td>
                     <td>
                       {r.price != null
                         ? `${(((r.high - r.price) / r.price) * 100).toFixed(2)}%`
                         : <span className="small">-</span>}
                     </td>
-                    <td>{r.price != null ? `$${Number(r.price).toFixed(2)}` : <span className="small">loading…</span>}</td>
                     <td>{r.score != null ? r.score.toFixed(2) : "-"}</td>
                     <td>
                       {thumb ? (
