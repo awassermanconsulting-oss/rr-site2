@@ -132,8 +132,9 @@ export default function Home() {
       return;
     }
     const currentScore = scoreLog10(price, row.low, row.high);
-    const upScore = Math.min(currentScore + 3, 10);
-    const downScore = Math.max(currentScore - 3, 0);
+    // A higher score represents a lower price (10 → 0 scale)
+    const upScore = Math.max(currentScore - 3, 0);
+    const downScore = Math.min(currentScore + 3, 10);
     setCalcResult({
       up: priceFromScore(upScore, row.low, row.high),
       down: priceFromScore(downScore, row.low, row.high),
