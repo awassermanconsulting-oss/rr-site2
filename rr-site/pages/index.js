@@ -274,10 +274,19 @@ export default function Home() {
       <section className="card small" style={{ lineHeight: 1.4, marginTop: 16 }}>
         <strong>Formulas:</strong>
         <div>
-          [10,0]: <code>score = 10 × log(high / price) / log(high / low)</code>
+          [10,0] (topScore = 0): <code>score = 10 × log(high / price) / log(high / low)</code>
         </div>
         <div>
-          [10,1]: <code>score = 1 + 9 × log(high / price) / log(high / low)</code>
+          [10,1] (topScore = 1): <code>score = 1 + 9 × log(high / price) / log(high / low)</code>
+        </div>
+        <div className="small">
+          (use topScore = 0 for [10,0] and topScore = 1 for [10,1])
+        </div>
+        <div>
+          3pt up: <code>price × (high / low)^(3 / (10 - topScore))</code>
+        </div>
+        <div>
+          3pt down: <code>price ÷ (high / low)^(3 / (10 - topScore))</code>
         </div>
       </section>
 
