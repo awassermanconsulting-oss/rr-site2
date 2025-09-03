@@ -279,6 +279,12 @@ export default function Home() {
         <div>
           [10,1]: <code>score = 1 + 9 × log(high / price) / log(high / low)</code>
         </div>
+        <div>
+          3pt up: <code>price × (high / low)^(3 / (10 - topScore))</code>
+        </div>
+        <div>
+          3pt down: <code>price ÷ (high / low)^(3 / (10 - topScore))</code>
+        </div>
       </section>
 
       <section className="card small" style={{ lineHeight: 1.4 }}>
