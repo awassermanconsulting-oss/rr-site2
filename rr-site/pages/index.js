@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 
-// Low = 10, High = 0 (log scale)
-function scoreLog10(price, low, high) {
+// Generic log scale where "top" is the score assigned to the high price
+function scoreLog10(price, low, high, top = 0) {
   const p = Math.max(Math.min(price, high), low);
-  const s = 10 * (Math.log(high / p) / Math.log(high / low));
-  return Math.max(0, Math.min(10, s));
+  const ratio = Math.log(high / p) / Math.log(high / low);
+  const s = top + (10 - top) * ratio;
+  return Math.max(top, Math.min(10, s));
 }
 
-function priceFromScore(score, low, high) {
-  return high / Math.pow(high / low, score / 10);
+function priceFromScore(score, low, high, top = 0) {
+  const ratio = (score - top) / (10 - top);
+  return high / Math.pow(high / low, ratio);
 }
 
 export default function Home() {
@@ -20,6 +22,7 @@ export default function Home() {
   const [calcTicker, setCalcTicker] = useState("");
   const [buyPrice, setBuyPrice] = useState("");
   const [calcResult, setCalcResult] = useState(null);
+  const [topScore, setTopScore] = useState(0);
 
   // lightbox state
   const [lightboxSrc, setLightboxSrc] = useState("");
@@ -67,7 +70,9 @@ export default function Home() {
         if (j && typeof j.price === "number") {
           setRows((prev) =>
             prev.map((row, idx) =>
-              idx === i ? { ...row, price: j.price, score: scoreLog10(j.price, row.low, row.high) } : row
+              idx === i
+                ? { ...row, price: j.price, score: scoreLog10(j.price, row.low, row.high, topScore) }
+                : row
             )
           );
         }
@@ -77,6 +82,15 @@ export default function Home() {
     setPriceLoading(false);
   }
   useEffect(() => { loadPrices(); }, [rows.length]);
+
+  useEffect(() => {
+    setRows((prev) =>
+      prev.map((r) =>
+        r.price != null ? { ...r, score: scoreLog10(r.price, r.low, r.high, topScore) } : r
+      )
+    );
+    setCalcResult(null);
+  }, [topScore]);
 
   const hasPrices = useMemo(() => rows.some((r) => r.price != null), [rows]);
   const sortedRows = useMemo(() => {
@@ -131,13 +145,13 @@ export default function Home() {
       setCalcResult(null);
       return;
     }
-    const currentScore = scoreLog10(price, row.low, row.high);
-    // A higher score represents a lower price (10 → 0 scale)
-    const upScore = Math.max(currentScore - 3, 0);
+    const currentScore = scoreLog10(price, row.low, row.high, topScore);
+    // A higher score represents a lower price (10 → topScore scale)
+    const upScore = Math.max(currentScore - 3, topScore);
     const downScore = Math.min(currentScore + 3, 10);
     setCalcResult({
-      up: priceFromScore(upScore, row.low, row.high),
-      down: priceFromScore(downScore, row.low, row.high),
+      up: priceFromScore(upScore, row.low, row.high, topScore),
+      down: priceFromScore(downScore, row.low, row.high, topScore),
     });
   };
 
@@ -145,7 +159,7 @@ export default function Home() {
     <div className="container grid">
       <header className="grid">
         <h1>Risk/Reward Tracker</h1>
-        <p className="small"> Log score 10→0 with color zones.</p>
+        <p className="small"> Log score 10→{topScore} with color zones.</p>
         <div className="flex-row">
           <a className="badge" href={process.env.NEXT_PUBLIC_STRIPE_LINK || "#"} target="_blank" rel="noreferrer">
             Subscribe free - Email zone label alerts & future launches
@@ -161,6 +175,15 @@ export default function Home() {
 
       {!!rows.length && (
         <section className="card">
+          <div style={{ marginBottom: 8 }}>
+            <label>
+              Interval:
+              <select value={topScore} onChange={(e) => setTopScore(Number(e.target.value))}>
+                <option value={0}>[10,0]</option>
+                <option value={1}>[10,1]</option>
+              </select>
+            </label>
+          </div>
           <table>
             <thead>
               <tr>
@@ -247,6 +270,16 @@ export default function Home() {
           )}
         </section>
       )}
+
+      <section className="card small" style={{ lineHeight: 1.4, marginTop: 16 }}>
+        <strong>Formulas:</strong>
+        <div>
+          [10,0]: <code>score = 10 × log(high / price) / log(high / low)</code>
+        </div>
+        <div>
+          [10,1]: <code>score = 1 + 9 × log(high / price) / log(high / low)</code>
+        </div>
+      </section>
 
       <section className="card small" style={{ lineHeight: 1.4 }}>
         <strong>Disclaimer:</strong> The “Low” and “High” lines reflect values as of the original
