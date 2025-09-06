@@ -3,7 +3,7 @@
 
 This is a super-simple website that:
 - lets you type a stock ticker
-- fetches the **current price** using Alpha Vantage (free)
+- fetches the **current price** from a public Google Sheet
 - shows your **Risk/Reward high & low** lines from `data/rr.json`
 - has a **Subscribe** button you can point at your Stripe **Payment Link** for $1/month
 
@@ -25,7 +25,6 @@ No monthly fees to run: host on **Vercel (free)** + Stripe fees only when someon
 ### 2) Connect Vercel to that repo
 1. Go to https://vercel.com/new → click **GitHub** and authorize (choose your `rr-site` repo).
 2. On the **“Environment Variables”** step, add:
-   - **Name:** `ALPHA_VANTAGE_KEY` → **Value:** YOUR_KEY (you already created this)
    - **Name:** `NEXT_PUBLIC_STRIPE_LINK` → **Value:** your Stripe **Payment Link URL**
      - (In Stripe: Products → your $1 product → **Payment Links** → create a link → copy URL)
 3. Click **Deploy**. In ~1–2 minutes you’ll get a live URL like `https://rr-site-yourname.vercel.app`.
