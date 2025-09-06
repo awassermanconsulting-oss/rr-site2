@@ -25,6 +25,7 @@ export default async function handler(req, res) {
       low: header.findIndex((h) => /(green|low)/i.test(h)),
       high: header.findIndex((h) => /(red|high)/i.test(h)),
       pick: header.findIndex((h) => /pick/i.test(h)),
+      price: header.findIndex((h) => /(price|close|last)/i.test(h)),
       chart: header.findIndex((h) => /chart/i.test(h)), // optional
     };
 
@@ -34,6 +35,7 @@ export default async function handler(req, res) {
         low: Number(r[idx.low]),
         high: Number(r[idx.high]),
         pickType: (r[idx.pick] || "").toUpperCase(),
+        price: idx.price >= 0 ? Number(r[idx.price]) : null,
         chartUrl: idx.chart >= 0 ? (r[idx.chart] || "").trim() : "",
       }))
       .filter((x) => x.ticker && isFinite(x.low) && isFinite(x.high));
