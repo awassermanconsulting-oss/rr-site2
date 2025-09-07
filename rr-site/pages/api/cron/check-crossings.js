@@ -74,42 +74,9 @@ function zoneIndex(s) {
 }
 
 // ---------- config ----------
-const ALPHA = process.env.ALPHA_VANTAGE_KEY;
 const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const PER_RUN = 6; // keep small to respect Alpha Vantage free tier
+const PER_RUN = 6; // number of tickers processed per run
 const resend = new Resend(process.env.RESEND_API_KEY);
-
-// ---------- market data (daily + fallback) ----------
-async function getDailyClose(symbol) {
-  const base = "https://www.alphavantage.co/query";
-  const paramsDaily = `function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(symbol)}&apikey=${ALPHA}&outputsize=compact`;
-  const r = await fetch(`${base}?${paramsDaily}`, { cache: "no-store" });
-  const j = await r.json();
-
-  if (j["Time Series (Daily)"]) {
-    const [date, row] = Object.entries(j["Time Series (Daily)"])[0];
-    return { date, close: Number(row["4. close"]) };
-  }
-
-  if (j["Note"] || j["Information"]) {
-    console.log(
-      `[alpha] rate-limited/info for ${symbol}: ${(j["Note"] || j["Information"]).slice(0, 80)}…`
-    );
-    return { rateLimited: true };
-  }
-
-  // fallback: GLOBAL_QUOTE
-  const paramsGq = `function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${ALPHA}`;
-  const r2 = await fetch(`${base}?${paramsGq}`, { cache: "no-store" });
-  const j2 = await r2.json();
-  const g = j2["Global Quote"];
-  if (g && g["05. price"]) {
-    const date = new Date().toISOString().slice(0, 10);
-    return { date, close: Number(g["05. price"]) };
-  }
-  console.log(`[alpha] no data for ${symbol}; keys=${Object.keys(j).join(",")}`);
-  return null;
-}
 
 // ---------- email ----------
 async function maybeEmail({ ticker, fromZone, toZone, price, date, low, high }) {
@@ -197,7 +164,14 @@ export default async function handler(req, res) {
 
     const origin = `${req.headers["x-forwarded-proto"] || "https"}://${req.headers.host}`;
     const listResp = await fetch(`${origin}/api/tickers`, { cache: "no-store" });
-    const { items = [] } = await listResp.json();
+    const txt = await listResp.text();
+    let items = [];
+    try {
+      ({ items = [] } = JSON.parse(txt));
+    } catch (err) {
+      console.log(`[tickers] bad response: ${txt.slice(0, 80)}`);
+      return res.status(500).json({ error: "tickers fetch failed" });
+    }
     if (!items.length) return res.status(200).json({ processed: 0, sent: 0 });
 
     // Optional override: run all once for manual tests: /api/cron/check-crossings?all=1
@@ -217,34 +191,18 @@ export default async function handler(req, res) {
     console.log(`[cron] processing ${slice.length}/${total} (cursor ${start} → ${nextCursor})`);
 
     let sent = 0;
-    let hitRateLimit = false;
 
     for (const it of slice) {
       const { ticker, low, high } = it;
-      let sheetPrice = Number.isFinite(it?.price) ? Number(it.price) : null;
+      const sheetPrice = Number.isFinite(it?.price) ? Number(it.price) : null;
 
       console.log(`[check] ${ticker}: low=${low}, high=${high}, sheetPrice=${sheetPrice ?? "n/a"}`);
-
-      // Use Google Sheet price first if present; else call Alpha Vantage
-      let latest;
-      if (Number.isFinite(sheetPrice)) {
-        latest = { date: new Date().toISOString().slice(0, 10), close: sheetPrice };
-      } else {
-        if (!ALPHA) {
-          console.log(`[check] ${ticker}: no sheet price and ALPHA_VANTAGE_KEY missing`);
-          continue;
-        }
-        latest = await getDailyClose(ticker);
-        if (!latest) {
-          console.log(`[check] ${ticker}: no data after fallback`);
-          continue;
-        }
-        if (latest.rateLimited) {
-          hitRateLimit = true;
-          console.log(`[rate-limit] stopping early; will retry same window next run`);
-          break;
-        }
+      if (!Number.isFinite(sheetPrice)) {
+        console.log(`[check] ${ticker}: missing sheet price; skipping`);
+        continue;
       }
+
+      const latest = { date: new Date().toISOString().slice(0, 10), close: sheetPrice };
 
       const s = scoreLog(latest.close, low, high);
       const z = zoneIndex(s);
@@ -271,14 +229,9 @@ export default async function handler(req, res) {
       }
     }
 
-    // If rate-limited, DO NOT advance cursor so we retry same window next time
-    if (hitRateLimit && !forceAll) {
-      nextCursor = start;
-    }
-
     await kv.set("alert:cursor", nextCursor);
-    console.log(`[cron] done: emails sent=${sent}, rate_limited=${hitRateLimit}`);
-    return res.status(200).json({ processed: slice.length, total, sent, nextCursor, rate_limited: hitRateLimit });
+    console.log(`[cron] done: emails sent=${sent}`);
+    return res.status(200).json({ processed: slice.length, total, sent, nextCursor });
   } catch (e) {
     console.log(`[error] ${e?.message || e}`);
     return res.status(500).json({ error: String(e?.message || e) });

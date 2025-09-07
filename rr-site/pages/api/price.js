@@ -1,6 +1,20 @@
 // pages/api/price.js
 import { kv } from "@vercel/kv";
 
+const SHEET_CSV =
+  "https://docs.google.com/spreadsheets/d/1XV8KCKkmo_cGUa9Nw2Y6Kdu4bzN6Rn60gKdpCDR32I8/export?format=csv&gid=0";
+
+function csvToRows(csv) {
+  return csv
+    .trim()
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .match(/("(?:[^"]|"")*"|[^,]+)/g)
+        .map((s) => s.replace(/^"|"$/g, "").replace(/""/g, '"').trim())
+    );
+}
+
 export default async function handler(req, res) {
   try {
     const symbol =
@@ -20,27 +34,30 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2) Fallback to Alpha Vantage GLOBAL_QUOTE only if needed
-    const key = process.env.ALPHA_VANTAGE_KEY;
-    if (!key) {
-      // No KV and no Alpha key → just return null price gracefully
+    // 2) Fallback to Google Sheet if KV miss
+    const r = await fetch(SHEET_CSV, { cache: "no-store" });
+    if (!r.ok) {
       return res.status(200).json({ price: null, source: "none", ticker: symbol });
     }
 
-    const r = await fetch(
-      `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(
-        symbol
-      )}&apikey=${key}`,
-      { cache: "no-store" }
+    const text = await r.text();
+    const rows = csvToRows(text);
+    const [header, ...data] = rows;
+    const idx = {
+      ticker: header.findIndex((h) => /longs?/i.test(h)),
+      price: header.findIndex((h) => /(price|close|last)/i.test(h)),
+    };
+    const row = data.find(
+      (r) =>
+        (r[idx.ticker] || "")
+          .replace(/[^A-Za-z0-9.\-]/g, "")
+          .toUpperCase() === symbol
     );
-
-    const data = await r.json();
-    const price = Number(data?.["Global Quote"]?.["05. price"]);
+    const price = row ? Number(row[idx.price]) : NaN;
     if (!Number.isFinite(price)) {
       return res.status(404).json({ error: "no price" });
     }
 
-    // Cache it back into KV so future reads are instant
     const today = new Date().toISOString().slice(0, 10);
     await kv.set(stateKey, {
       ...(snap || {}),
@@ -48,7 +65,7 @@ export default async function handler(req, res) {
       lastDate: today,
     });
 
-    return res.status(200).json({ price, date: today, source: "alpha", ticker: symbol });
+    return res.status(200).json({ price, date: today, source: "sheet", ticker: symbol });
   } catch (e) {
     return res.status(500).json({ error: String(e?.message || e) });
   }
