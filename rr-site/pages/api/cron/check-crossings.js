@@ -164,7 +164,14 @@ export default async function handler(req, res) {
 
     const origin = `${req.headers["x-forwarded-proto"] || "https"}://${req.headers.host}`;
     const listResp = await fetch(`${origin}/api/tickers`, { cache: "no-store" });
-    const { items = [] } = await listResp.json();
+    const txt = await listResp.text();
+    let items = [];
+    try {
+      ({ items = [] } = JSON.parse(txt));
+    } catch (err) {
+      console.log(`[tickers] bad response: ${txt.slice(0, 80)}`);
+      return res.status(500).json({ error: "tickers fetch failed" });
+    }
     if (!items.length) return res.status(200).json({ processed: 0, sent: 0 });
 
     // Optional override: run all once for manual tests: /api/cron/check-crossings?all=1
