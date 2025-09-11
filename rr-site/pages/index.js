@@ -158,7 +158,7 @@ export default function Home() {
   return (
     <div className="container grid">
       <header className="grid">
-        <h1>Risk/Reward Tracker</h1>
+        <h1>Risk/Reward Tracker; Aware of issue with prices not updating</h1>
         <p className="small"> Log score 10→{topScore} with color zones.</p>
         <div className="flex-row">
           <a className="badge" href={process.env.NEXT_PUBLIC_STRIPE_LINK || "#"} target="_blank" rel="noreferrer">
