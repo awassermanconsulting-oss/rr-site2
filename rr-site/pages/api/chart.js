@@ -1,5 +1,7 @@
 // pages/api/chart.js
-// Proxy remote PNGs so the browser will render them inline.
+// Proxy remote images, compressing them for delivery.
+
+import sharp from "sharp";
 
 export default async function handler(req, res) {
   try {
@@ -24,13 +26,17 @@ export default async function handler(req, res) {
     }
 
     const buf = Buffer.from(await upstream.arrayBuffer());
+    const optimized = await sharp(buf)
+      .resize({ width: 800 })
+      .webp({ quality: 80 })
+      .toBuffer();
 
     // Force an image content type and inline display
-    res.setHeader("Content-Type", "image/png");
-    res.setHeader("Content-Disposition", "inline; filename=chart.png");
-    res.setHeader("Cache-Control", "public, max-age=300"); // 5 minutes
+    res.setHeader("Content-Type", "image/webp");
+    res.setHeader("Content-Disposition", "inline; filename=chart.webp");
+    res.setHeader("Cache-Control", "public, max-age=86400, s-maxage=86400");
 
-    return res.status(200).send(buf);
+    return res.status(200).send(optimized);
   } catch (e) {
     return res.status(500).send("error");
   }

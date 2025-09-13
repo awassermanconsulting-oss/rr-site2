@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 
 // Generic log scale where "top" is the score assigned to the high price
 function scoreLog10(price, low, high, top = 0) {
@@ -27,7 +28,7 @@ export default function Home() {
   // lightbox state
   const [lightboxSrc, setLightboxSrc] = useState("");
   const openLightbox = (chartUrl) => {
-    const proxied = `/api/chart?url=${encodeURIComponent(chartUrl)}&t=${Date.now()}`;
+    const proxied = `/api/chart?url=${encodeURIComponent(chartUrl)}`;
     setLightboxSrc(proxied);
     document.body.style.overflow = "hidden"; // prevent background scroll
   };
@@ -200,7 +201,7 @@ export default function Home() {
             <tbody>
               {sortedRows.map((r) => {
                 const thumb = r.chartUrl
-                  ? `/api/chart?url=${encodeURIComponent(r.chartUrl)}&t=${Date.now()}`
+                  ? `/api/chart?url=${encodeURIComponent(r.chartUrl)}`
                   : "";
                 return (
                   <tr key={r.ticker}>
@@ -218,7 +219,14 @@ export default function Home() {
                     <td>
                       {thumb ? (
                         <button className="thumbbtn" onClick={() => openLightbox(r.chartUrl)} aria-label={`Open ${r.ticker} chart`}>
-                          <img src={thumb} alt={`${r.ticker} chart`} className="thumb" loading="lazy" />
+                          <Image
+                            src={thumb}
+                            alt={`${r.ticker} chart`}
+                            className="thumb"
+                            width={180}
+                            height={100}
+                            loading="lazy"
+                          />
                         </button>
                       ) : (
                         <span className="small">—</span>
@@ -310,7 +318,13 @@ export default function Home() {
         <div className="lightbox" onClick={closeLightbox}>
           <div className="lightbox-inner" onClick={(e) => e.stopPropagation()}>
             <button className="lightbox-close" onClick={closeLightbox} aria-label="Close">×</button>
-            <img src={lightboxSrc} alt="Chart" className="lightbox-img" />
+            <Image
+              src={lightboxSrc}
+              alt="Chart"
+              className="lightbox-img"
+              width={1200}
+              height={800}
+            />
           </div>
         </div>
       )}
