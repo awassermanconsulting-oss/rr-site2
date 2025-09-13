@@ -1,6 +1,8 @@
 const SHEET_CSV =
   "https://docs.google.com/spreadsheets/d/1XV8KCKkmo_cGUa9Nw2Y6Kdu4bzN6Rn60gKdpCDR32I8/export?format=csv&gid=0";
 
+let cache = { items: null, expiry: 0 };
+
 function csvToRows(csv) {
   return csv
     .trim()
@@ -14,6 +16,11 @@ function csvToRows(csv) {
 
 export default async function handler(req, res) {
   try {
+    if (cache.items && Date.now() < cache.expiry) {
+      res.setHeader("Cache-Control", "public, s-maxage=300");
+      return res.status(200).json({ items: cache.items });
+    }
+
     const r = await fetch(SHEET_CSV, { cache: "no-store" });
     if (!r.ok) throw new Error("sheet fetch failed");
     const text = await r.text();
@@ -48,6 +55,8 @@ export default async function handler(req, res) {
       return a.ticker.localeCompare(b.ticker);
     });
 
+    cache = { items, expiry: Date.now() + 300000 };
+    res.setHeader("Cache-Control", "public, s-maxage=300");
     res.status(200).json({ items });
   } catch (e) {
     res.status(500).json({ error: String(e?.message || e) });
