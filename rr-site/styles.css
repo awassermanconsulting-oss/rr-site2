@@ -67,3 +67,5 @@ td,th{border-bottom:1px solid #203157;padding:8px;text-align:left}
   .thumb{ width:140px; height:78px; }
 }
 
+.math{ font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; }
+

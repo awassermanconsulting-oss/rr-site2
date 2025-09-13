@@ -159,12 +159,9 @@ export default function Home() {
   return (
     <div className="container grid">
       <header className="grid">
-        <h1>Risk/Reward Tracker; Aware of issue with prices not updating</h1>
+        <h1>Risk/Reward Tracker</h1>
         <p className="small"> Log score 10→{topScore} with color zones.</p>
         <div className="flex-row">
-          <a className="badge" href={process.env.NEXT_PUBLIC_STRIPE_LINK || "#"} target="_blank" rel="noreferrer">
-            Subscribe free - Email zone label alerts & future launches
-          </a>
           <button className="btn" onClick={loadPrices} disabled={priceLoading}>
             {priceLoading ? "Refreshing…" : "Refresh current prices"}
           </button>
@@ -281,27 +278,11 @@ export default function Home() {
 
       <section className="card small" style={{ lineHeight: 1.4, marginTop: 16 }}>
         <strong>Formulas:</strong>
-        <div>
-          [10,0] (topScore = 0): <code>score = 10 × log(high / price) / log(high / low)</code>
-        </div>
-        <div>
-          [10,1] (topScore = 1): <code>score = 1 + 9 × log(high / price) / log(high / low)</code>
-        </div>
-        <div className="small">
-          (use topScore = 0 for [10,0] and topScore = 1 for [10,1])
-        </div>
-        <div>
-          3pt up: <code>price × (high / low)^(3 / (10 - topScore))</code>
-        </div>
-        <div>
-          3pt down: <code>price ÷ (high / low)^(3 / (10 - topScore))</code>
-        </div>
-        <div>
-          3pt up: <code>price × (high / low)^(3 / (10 - topScore))</code>
-        </div>
-        <div>
-          3pt down: <code>price ÷ (high / low)^(3 / (10 - topScore))</code>
-        </div>
+        <pre className="math">{`[10,0] (topScore = 0): score = 10 × log(high / price) / log(high / low)
+[10,1] (topScore = 1): score = 1 + 9 × log(high / price) / log(high / low)
+
+3pt up   = price × (high / low)^(3 / (10 - topScore))
+3pt down = price ÷ (high / low)^(3 / (10 - topScore))`}</pre>
       </section>
 
       <section className="card small" style={{ lineHeight: 1.4 }}>
