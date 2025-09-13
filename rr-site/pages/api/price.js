@@ -29,10 +29,12 @@ export default async function handler(req, res) {
       return res.status(200).json(cached.data);
     }
 
+    const today = new Date().toISOString().slice(0, 10);
+
     // 1) Try KV snapshot first (populated by /api/cron/check-crossings)
     const stateKey = `alert:${symbol}`;
     const snap = await kv.get(stateKey);
-    if (snap?.lastClose && snap?.lastDate) {
+    if (snap?.lastClose && snap?.lastDate === today) {
       // backward-compatible: still return { price }, but include extras too
       const result = {
         price: snap.lastClose,
@@ -71,7 +73,6 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: "no price" });
     }
 
-    const today = new Date().toISOString().slice(0, 10);
     await kv.set(stateKey, {
       ...(snap || {}),
       lastClose: price,
