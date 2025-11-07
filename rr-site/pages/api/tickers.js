@@ -16,9 +16,23 @@ function csvToRows(csv) {
 
 export default async function handler(req, res) {
   try {
-    if (cache.items && Date.now() < cache.expiry) {
+    const bypassCache =
+      "refresh" in req.query || "nocache" in req.query || req.query.cache === "false";
+    const filterTicker =
+      typeof req.query.ticker === "string"
+        ? req.query.ticker.trim().toUpperCase()
+        : typeof req.query.symbol === "string"
+        ? req.query.symbol.trim().toUpperCase()
+        : "";
+
+    const applyFilter = (items) =>
+      filterTicker
+        ? items.filter((item) => item.ticker.toUpperCase() === filterTicker)
+        : items;
+
+    if (!bypassCache && cache.items && Date.now() < cache.expiry) {
       res.setHeader("Cache-Control", "public, s-maxage=300");
-      return res.status(200).json({ items: cache.items });
+      return res.status(200).json({ items: applyFilter(cache.items), cached: true });
     }
 
     const r = await fetch(SHEET_CSV, { cache: "no-store" });
@@ -56,8 +70,12 @@ export default async function handler(req, res) {
     });
 
     cache = { items, expiry: Date.now() + 300000 };
-    res.setHeader("Cache-Control", "public, s-maxage=300");
-    res.status(200).json({ items });
+    if (bypassCache) {
+      res.setHeader("Cache-Control", "no-store");
+    } else {
+      res.setHeader("Cache-Control", "public, s-maxage=300");
+    }
+    res.status(200).json({ items: applyFilter(items), cached: !bypassCache });
   } catch (e) {
     res.status(500).json({ error: String(e?.message || e) });
   }

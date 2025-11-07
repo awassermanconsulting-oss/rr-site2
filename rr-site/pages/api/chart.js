@@ -26,17 +26,26 @@ export default async function handler(req, res) {
     }
 
     const buf = Buffer.from(await upstream.arrayBuffer());
-    const optimized = await sharp(buf)
-      .resize({ width: 800 })
-      .webp({ quality: 80 })
-      .toBuffer();
 
-    // Force an image content type and inline display
-    res.setHeader("Content-Type", "image/webp");
-    res.setHeader("Content-Disposition", "inline; filename=chart.webp");
-    res.setHeader("Cache-Control", "public, max-age=86400, s-maxage=86400");
+    let body = buf;
+    let contentType = upstream.headers.get("content-type") || "image/png";
 
-    return res.status(200).send(optimized);
+    try {
+      body = await sharp(buf)
+        .resize({ width: 800, withoutEnlargement: true })
+        .webp({ quality: 80 })
+        .toBuffer();
+      contentType = "image/webp";
+    } catch (err) {
+      // fall back to the original bytes if sharp cannot process the image
+      body = buf;
+    }
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", "inline; filename=chart");
+    res.setHeader("Cache-Control", "public, max-age=300, s-maxage=300");
+
+    return res.status(200).send(body);
   } catch (e) {
     return res.status(500).send("error");
   }
