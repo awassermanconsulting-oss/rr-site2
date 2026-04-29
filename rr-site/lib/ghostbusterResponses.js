@@ -252,6 +252,10 @@ export const ghostbusterResponseConfig = {
   },
 };
 
+function pick(items) {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
 function normalize(text) {
   return text.toLowerCase().replace(/[.,!?]/g, "").replace(/\s+/g, " ").trim();
 }
