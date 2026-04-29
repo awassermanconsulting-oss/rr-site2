@@ -106,7 +106,14 @@ export default function GhostbusterHotline() {
   function answer(input) {
     respondingRef.current = true;
     stopListening();
-    const reply = getGhostbusterResponse(input);
+
+    let reply = "Say that again. My scanner spiked.";
+    try {
+      reply = getGhostbusterResponse(input);
+    } catch (error) {
+      console.error("Ghostbuster response error", error);
+    }
+
     setStatus("Hotline says");
     setCaption(reply);
     speak(reply, () => {
