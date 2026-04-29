@@ -9,9 +9,9 @@ const intros = [
 ];
 
 const prompts = [
-  ["I still hear it", "I hear something."],
-  ["Hallway ghost", "There is a ghost in the hallway."],
-  ["Spooky noise", "What was that sound?"],
+  ["I hear it", "I hear something."],
+  ["Trap it", "How do we trap it?"],
+  ["It got away", "It got away."],
   ["We caught it", "We caught it."],
 ];
 
