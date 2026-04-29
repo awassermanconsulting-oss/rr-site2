@@ -1,5 +1,6 @@
 import Head from "next/head";
 import { useEffect, useRef, useState } from "react";
+import { getGhostbusterResponse } from "../lib/ghostbusterResponses";
 
 const intros = [
   "Paranormal Hotline. This is dispatch. Okay, tell me what is happening.",
@@ -7,44 +8,10 @@ const intros = [
   "Spooky-response desk. We have the meters warmed up. Go ahead with your report.",
 ];
 
-const replyGroups = {
-  generic: [
-    "Okay, copy that. Everybody freeze like statues and listen for three seconds. If it goes boo again, point your flashlights low.",
-    "Good report. I am sending the jump-pack team to your room. Check behind the couch, but use your brave walking feet.",
-    "Hmm. The ghost may be looking for snacks. Say hello in your serious voice and ask it to wiggle the curtains.",
-    "Confirmed. I hear suspicious whooshing on the scanner. March three steps, spin once, and tell me if the ghost moved.",
-    "Nice work. Hold your pretend trap open and count down from five. I will start the capture hum.",
-  ],
-  hallway: [
-    "Hallway ghost confirmed. Stand at the doorway, shine your light at the floor, and say, this hallway is closed for ghost business.",
-    "Copy hallway activity. The echo meter says it is halfway between silly and spooky. Walk together and check the corners.",
-    "Alright, hallway team. Look left, look right, then whisper, no sneaky ghosts allowed past this point.",
-  ],
-  noise: [
-    "Spooky noise logged. That was a class three creaker. Tap the wall twice and ask it to use its indoor boo.",
-    "I heard that on the sound scanner. Everyone make your best tiny siren noise, then listen for where it answers.",
-    "Yep, I caught that. It sounds like a furniture squeak with ghost manners. Check under the nearest blanket.",
-  ],
-  still: [
-    "Still hearing it. Got it. Move toward the sound very slowly and tell me if it gets louder or sillier.",
-    "The ghost is being stubborn. Switch to whisper mode, sneak two steps closer, and keep the pretend trap ready.",
-    "Okay, stay on the line with me. Point to where the sound came from, then give me one very serious nod.",
-  ],
-  caught: [
-    "Outstanding. Trap is sealed. Please give the ghost one polite goodbye and place the trap somewhere extremely official.",
-    "Capture complete. The spooky meter is back to normal. High fives for the whole field team.",
-  ],
-  repeat: [
-    "I am still here. Tell me what the ghost is doing now.",
-    "Field team standing by. Give me the next spooky update.",
-    "Scanner is listening. Report any boo, bump, whoosh, or suspicious giggle.",
-  ],
-};
-
 const prompts = [
-  ["I still hear it", "I still hear something."],
+  ["I still hear it", "I hear something."],
   ["Hallway ghost", "There is a ghost in the hallway."],
-  ["Spooky noise", "It made a spooky noise."],
+  ["Spooky noise", "What was that sound?"],
   ["We caught it", "We caught it."],
 ];
 
@@ -60,34 +27,6 @@ function scoreVoice(voice) {
   return score;
 }
 
-function chooseReply(input, lastReply) {
-  const text = input.toLowerCase();
-  let pool = replyGroups.generic;
-
-  if (text.includes("hall") || text.includes("stairs") || text.includes("door")) {
-    pool = replyGroups.hallway;
-  } else if (text.includes("noise") || text.includes("sound") || text.includes("boo") || text.includes("creak")) {
-    pool = replyGroups.noise;
-  } else if (text.includes("still") || text.includes("again") || text.includes("hear")) {
-    pool = replyGroups.still;
-  } else if (text.includes("caught") || text.includes("trap") || text.includes("got it")) {
-    pool = replyGroups.caught;
-  } else if (text.includes("hello") || text.includes("there")) {
-    pool = replyGroups.repeat;
-  }
-
-  let reply = pick(pool);
-  if (reply === lastReply && pool.length > 1) {
-    reply = pick(pool.filter((item) => item !== lastReply));
-  }
-  return reply;
-}
-
-function humanize(text) {
-  const openers = ["Okay. ", "Alright. ", "Copy that. ", "Got it. ", ""];
-  return /^(Okay|Alright|Copy|Got it|Good|Confirmed|Outstanding|Capture)/i.test(text) ? text : `${pick(openers)}${text}`;
-}
-
 export default function GhostbusterHotline() {
   const [status, setStatus] = useState("Ready to call");
   const [caption, setCaption] = useState("Tap call, then tell the crew what you hear.");
@@ -98,7 +37,6 @@ export default function GhostbusterHotline() {
   const [voiceChoice, setVoiceChoice] = useState("auto");
   const recognitionRef = useRef(null);
   const respondingRef = useRef(false);
-  const lastReplyRef = useRef("");
 
   function selectedVoice() {
     if (voiceChoice === "auto") return voices[0] || null;
@@ -109,7 +47,7 @@ export default function GhostbusterHotline() {
     if (typeof window === "undefined") return;
 
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(humanize(text));
+    const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 0.88;
     utterance.pitch = 0.92;
     utterance.volume = 1;
@@ -168,8 +106,7 @@ export default function GhostbusterHotline() {
   function answer(input) {
     respondingRef.current = true;
     stopListening();
-    const reply = chooseReply(input, lastReplyRef.current);
-    lastReplyRef.current = reply;
+    const reply = getGhostbusterResponse(input);
     setStatus("Hotline says");
     setCaption(reply);
     speak(reply, () => {
